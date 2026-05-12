@@ -1,0 +1,53 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+secrets/
+
+# Certificates and keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.csr
+
+# Claude Code local overrides (personal, not team-wide)
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Dependencies (update for your stack)
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build output
+dist/
+build/
+*.egg-info/
+
+# Test coverage
+coverage/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Local SQLite database
+wifibuddy.db
+*.db-journal
+*.db-wal
+*.db-shm

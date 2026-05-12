@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}wifibuddy — Find Fast Wifi{% endblock %}
+{% block content %}
+<h1>Community Wifi Speeds</h1>
+<p>Crowd-sourced speed tests from cafes and public spaces worldwide.
+   <a href="/submit">Submit your result →</a></p>
+
+{% if venues %}
+<figure>
+  <table>
+    <thead>
+      <tr>
+        <th>Network (SSID)</th>
+        <th>Venue</th>
+        <th>Download</th>
+        <th>Reports</th>
+        <th>Last seen</th>
+      </tr>
+    </thead>
+    <tbody id="venue-rows">
+      {% for v in venues %}
+      <tr>
+        <td><a href="/venues/{{ v.id }}">{{ v.ssid }}</a></td>
+        <td>{{ v.name or "—" }}</td>
+        <td><span class="speed-{{ v.speed_class }}">
+          {% if v.median_download_mbps %}{{ "%.1f"|format(v.median_download_mbps) }} Mbps{% else %}—{% endif %}
+        </span></td>
+        <td>{{ v.report_count }}</td>
+        <td>{{ v.last_reported_ago }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</figure>
+
+{% if has_next %}
+<a href="/?page={{ page + 1 }}" role="button" class="secondary outline">Load more</a>
+{% endif %}
+
+{% else %}
+<p>No speed reports yet. <a href="/submit">Be the first to submit one!</a></p>
+{% endif %}
+{% endblock %}

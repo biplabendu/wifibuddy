@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}wifibuddy{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    .speed-fast  { color: #2d9614; font-weight: bold; }
+    .speed-ok    { color: #b45309; font-weight: bold; }
+    .speed-slow  { color: #dc2626; font-weight: bold; }
+    .speed-unknown { color: #6b7280; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul><li><strong><a href="/" style="text-decoration:none">📶 wifibuddy</a></strong></li></ul>
+      <ul>
+        <li><a href="/submit" role="button" class="secondary outline">Submit Speed</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="container">
+    <small>Community-tracked wifi speeds · <a href="/submit">Submit yours</a></small>
+  </footer>
+  <script src="https://unpkg.com/htmx.org@2.0.3/dist/htmx.min.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}wifibuddy — Wifi Map{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  #map { height: 60vh; border-radius: 8px; }
+</style>
+{% endblock %}
+{% block content %}
+<h2>Nearby Wifi</h2>
+<div id="map"></div>
+<p><a href="/?list=1">Switch to list view</a></p>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const venues = {{ venues | tojson }};
+  const map = L.map('map');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  const colorMap = { fast: '#2d9614', ok: '#b45309', slow: '#dc2626', unknown: '#6b7280' };
+
+  venues.forEach(v => {
+    if (v.lat == null || v.lng == null) return;
+    const color = colorMap[v.speed_class] || colorMap.unknown;
+    const marker = L.circleMarker([v.lat, v.lng], {
+      radius: 10, color, fillColor: color, fillOpacity: 0.7, weight: 2
+    }).addTo(map);
+    const dl = v.median_download_mbps ? v.median_download_mbps.toFixed(1) + ' Mbps' : '—';
+    marker.bindPopup(
+      `<strong><a href="/venues/${v.id}">${v.ssid}</a></strong><br>` +
+      (v.name ? v.name + '<br>' : '') +
+      `⬇ ${dl}`
+    );
+  });
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+    }, () => map.setView([20, 0], 2));
+  } else {
+    map.setView([20, 0], 2);
+  }
+</script>
+{% endblock %}

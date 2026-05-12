@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}wifibuddy — Find Fast Wifi{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--pico-muted-border-color);
+    margin-bottom: 1.5rem;
+  }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    padding: 0.6rem 1.75rem;
+    margin-bottom: -2px;
+    cursor: pointer;
+    font-size: 1rem;
+    color: var(--pico-muted-color);
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--pico-primary); }
+  .tab-btn.active {
+    border-bottom-color: var(--pico-primary);
+    color: var(--pico-primary);
+    font-weight: 600;
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  #map { height: 65vh; border-radius: 8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<hgroup>
+  <h1>Community Wifi Speeds</h1>
+  <p>Crowd-sourced speed tests from cafes and public spaces worldwide.
+     <a href="/submit">Submit your result →</a></p>
+</hgroup>
+
+<div class="tabs" role="tablist">
+  <button class="tab-btn active" role="tab" aria-controls="tab-list" aria-selected="true"
+          onclick="switchTab('list')">📋 List</button>
+  <button class="tab-btn"        role="tab" aria-controls="tab-map"  aria-selected="false"
+          onclick="switchTab('map')">🗺️ Map</button>
+</div>
+
+<!-- List tab -->
+<div id="tab-list" class="tab-panel active" role="tabpanel">
+  {% if venues %}
+  <figure>
+    <table>
+      <thead>
+        <tr>
+          <th>Network (SSID)</th>
+          <th>Venue</th>
+          <th>Download</th>
+          <th>Reports</th>
+          <th>Last seen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in venues %}
+        <tr>
+          <td><a href="/venues/{{ v.id }}">{{ v.ssid }}</a></td>
+          <td>{{ v.name or "—" }}</td>
+          <td>
+            <span class="speed-{{ v.speed_class }}">
+              {% if v.median_download_mbps %}{{ "%.1f"|format(v.median_download_mbps) }} Mbps{% else %}—{% endif %}
+            </span>
+          </td>
+          <td>{{ v.report_count }}</td>
+          <td>{{ v.last_reported_ago }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </figure>
+  {% if has_next %}
+  <a href="/?page={{ page + 1 }}" role="button" class="secondary outline">Load more</a>
+  {% endif %}
+  {% else %}
+  <p>No speed reports yet. <a href="/submit">Be the first to submit one!</a></p>
+  {% endif %}
+</div>
+
+<!-- Map tab -->
+<div id="tab-map" class="tab-panel" role="tabpanel">
+  <div id="map"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const venues = {{ venues | tojson }};
+  let mapInitialized = false;
+  let leafletMap = null;
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      const active = btn.getAttribute('aria-controls') === 'tab-' + name;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active);
+    });
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+      panel.classList.toggle('active', panel.id === 'tab-' + name);
+    });
+    if (name === 'map') {
+      if (!mapInitialized) {
+        // Defer one frame so the browser has laid out the now-visible container
+        requestAnimationFrame(initMap);
+      } else if (leafletMap) {
+        leafletMap.invalidateSize();
+      }
+    }
+    history.replaceState(null, '', location.pathname + location.search + '#' + name);
+  }
+
+  function initMap() {
+    mapInitialized = true;
+    // Provide a default view so tiles load immediately; geolocation may override it
+    leafletMap = L.map('map', { center: [20, 0], zoom: 2 });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(leafletMap);
+
+    const colors = { fast: '#2d9614', ok: '#b45309', slow: '#dc2626', unknown: '#6b7280' };
+    const bounds = [];
+    venues.forEach(v => {
+      if (v.lat == null || v.lng == null) return;
+      const color = colors[v.speed_class] || colors.unknown;
+      const marker = L.circleMarker([v.lat, v.lng], {
+        radius: 10, color, fillColor: color, fillOpacity: 0.7, weight: 2
+      }).addTo(leafletMap);
+      const dl = v.median_download_mbps ? v.median_download_mbps.toFixed(1) + ' Mbps' : '—';
+      marker.bindPopup(
+        `<strong><a href="/venues/${v.id}">${v.ssid}</a></strong><br>` +
+        (v.name ? v.name + '<br>' : '') +
+        `⬇ ${dl}`
+      );
+      bounds.push([v.lat, v.lng]);
+    });
+
+    if (bounds.length) leafletMap.fitBounds(bounds, { padding: [40, 40] });
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => leafletMap.setView([pos.coords.latitude, pos.coords.longitude], 14),
+        () => {}
+      );
+    }
+
+    leafletMap.invalidateSize();
+  }
+
+  // Restore tab from URL hash on load
+  if (location.hash === '#map') switchTab('map');
+</script>
+{% endblock %}

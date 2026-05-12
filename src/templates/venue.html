@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ venue.ssid }} — wifibuddy{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/">Home</a></li>
+    <li>{{ venue.ssid }}</li>
+  </ul>
+</nav>
+
+<hgroup>
+  <h1>{{ venue.ssid }}</h1>
+  {% if venue.name %}<p>{{ venue.name }}</p>{% endif %}
+</hgroup>
+
+<div class="grid">
+  <article>
+    <header>Download</header>
+    <span class="speed-{{ speed_class }}">
+      {% if stats.median_download_mbps %}{{ "%.1f"|format(stats.median_download_mbps) }} Mbps{% else %}—{% endif %}
+    </span>
+  </article>
+  <article>
+    <header>Upload</header>
+    {% if stats.median_upload_mbps %}{{ "%.1f"|format(stats.median_upload_mbps) }} Mbps{% else %}—{% endif %}
+  </article>
+  <article>
+    <header>Ping</header>
+    {% if stats.median_ping_ms %}{{ "%.0f"|format(stats.median_ping_ms) }} ms{% else %}—{% endif %}
+  </article>
+  <article>
+    <header>Reports</header>
+    {{ stats.report_count }}
+  </article>
+</div>
+
+{% if stats.last_reported_at %}
+<p><small>Last reported {{ stats.last_reported_at }}</small></p>
+{% endif %}
+
+<a href="/submit?ssid={{ venue.ssid | urlencode }}&venue_id={{ venue.id }}"
+   role="button" class="outline">Submit a new report</a>
+
+<h2>Report history</h2>
+{% if reports %}
+<figure>
+  <table>
+    <thead>
+      <tr>
+        <th>When</th>
+        <th>Download</th>
+        <th>Upload</th>
+        <th>Ping</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in reports %}
+      <tr>
+        <td>{{ r.submitted_ago }}</td>
+        <td>{{ "%.1f"|format(r.download_mbps) }} Mbps</td>
+        <td>{{ "%.1f"|format(r.upload_mbps) }} Mbps</td>
+        <td>{% if r.ping_ms %}{{ "%.0f"|format(r.ping_ms) }} ms{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</figure>
+{% if has_next %}
+<a href="/venues/{{ venue.id }}?page={{ page + 1 }}" role="button" class="secondary outline">Older reports</a>
+{% endif %}
+{% else %}
+<p>No reports yet.</p>
+{% endif %}
+{% endblock %}
