@@ -10,6 +10,30 @@
     .speed-ok    { color: #b45309; font-weight: bold; }
     .speed-slow  { color: #dc2626; font-weight: bold; }
     .speed-unknown { color: #6b7280; }
+    .nav-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid var(--pico-muted-border-color);
+      margin: 0 0 1.5rem 0;
+      padding: 0;
+      list-style: none;
+    }
+    .nav-tabs a {
+      display: block;
+      padding: 0.6rem 1.5rem;
+      margin-bottom: -2px;
+      border-bottom: 3px solid transparent;
+      color: var(--pico-muted-color);
+      text-decoration: none;
+      font-size: 1rem;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .nav-tabs a:hover { color: var(--pico-primary); }
+    .nav-tabs a.active {
+      border-bottom-color: var(--pico-primary);
+      color: var(--pico-primary);
+      font-weight: 600;
+    }
   </style>
   {% block head %}{% endblock %}
 </head>
@@ -17,10 +41,12 @@
   <header class="container">
     <nav>
       <ul><li><strong><a href="/" style="text-decoration:none">📶 wifibuddy</a></strong></li></ul>
-      <ul>
-        <li><a href="/submit" role="button" class="secondary outline">Submit Speed</a></li>
-      </ul>
     </nav>
+    <ul class="nav-tabs" role="tablist">
+      <li><a href="/submit" data-tab="report" class="{% if nav_active == 'report' %}active{% endif %}">📝 Report</a></li>
+      <li><a href="/"       data-tab="list"   class="{% if nav_active == 'list'   %}active{% endif %}">📋 List</a></li>
+      <li><a href="/#map"   data-tab="map"    class="{% if nav_active == 'map'    %}active{% endif %}">🗺️ Map</a></li>
+    </ul>
   </header>
   <main class="container">
     {% block content %}{% endblock %}
@@ -29,6 +55,24 @@
     <small>Community-tracked wifi speeds · <a href="/submit">Submit yours</a></small>
   </footer>
   <script src="https://unpkg.com/htmx.org@2.0.3/dist/htmx.min.js"></script>
+  <script>
+    // Highlight the Map tab when the URL hash is #map (server can't see the hash)
+    (function syncMapTab() {
+      const tabs = document.querySelectorAll('.nav-tabs a');
+      if (!tabs.length) return;
+      function apply() {
+        const onIndex = location.pathname === '/' || location.pathname === '';
+        const wantMap = onIndex && location.hash === '#map';
+        tabs.forEach(a => {
+          const t = a.dataset.tab;
+          if (t === 'map') a.classList.toggle('active', wantMap);
+          if (t === 'list' && onIndex) a.classList.toggle('active', !wantMap);
+        });
+      }
+      apply();
+      window.addEventListener('hashchange', apply);
+    })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

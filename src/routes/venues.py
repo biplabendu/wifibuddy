@@ -70,7 +70,7 @@ async def index(request: Request, page: int = 1):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"venues": page_venues, "page": page, "has_next": has_next},
+        {"venues": page_venues, "page": page, "has_next": has_next, "nav_active": "list"},
     )
 
 

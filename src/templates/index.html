@@ -4,29 +4,6 @@
 {% block head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  .tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 2px solid var(--pico-muted-border-color);
-    margin-bottom: 1.5rem;
-  }
-  .tab-btn {
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    padding: 0.6rem 1.75rem;
-    margin-bottom: -2px;
-    cursor: pointer;
-    font-size: 1rem;
-    color: var(--pico-muted-color);
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .tab-btn:hover { color: var(--pico-primary); }
-  .tab-btn.active {
-    border-bottom-color: var(--pico-primary);
-    color: var(--pico-primary);
-    font-weight: 600;
-  }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
   #map { height: 65vh; border-radius: 8px; }
@@ -40,13 +17,6 @@
      <a href="/submit">Submit your result →</a></p>
 </hgroup>
 
-<div class="tabs" role="tablist">
-  <button class="tab-btn active" role="tab" aria-controls="tab-list" aria-selected="true"
-          onclick="switchTab('list')">📋 List</button>
-  <button class="tab-btn"        role="tab" aria-controls="tab-map"  aria-selected="false"
-          onclick="switchTab('map')">🗺️ Map</button>
-</div>
-
 <!-- List tab -->
 <div id="tab-list" class="tab-panel active" role="tabpanel">
   {% if venues %}
@@ -54,8 +24,7 @@
     <table>
       <thead>
         <tr>
-          <th>Network (SSID)</th>
-          <th>Venue</th>
+          <th>Wifi Name</th>
           <th>Download</th>
           <th>Reports</th>
           <th>Last seen</th>
@@ -64,8 +33,7 @@
       <tbody>
         {% for v in venues %}
         <tr>
-          <td><a href="/venues/{{ v.id }}">{{ v.ssid }}</a></td>
-          <td>{{ v.name or "—" }}</td>
+          <td><a href="/venues/{{ v.id }}">{{ v.name or v.ssid }}</a></td>
           <td>
             <span class="speed-{{ v.speed_class }}">
               {% if v.median_download_mbps %}{{ "%.1f"|format(v.median_download_mbps) }} Mbps{% else %}—{% endif %}
@@ -99,29 +67,21 @@
   let mapInitialized = false;
   let leafletMap = null;
 
-  function switchTab(name) {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      const active = btn.getAttribute('aria-controls') === 'tab-' + name;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-selected', active);
-    });
+  function showPanel(name) {
     document.querySelectorAll('.tab-panel').forEach(panel => {
       panel.classList.toggle('active', panel.id === 'tab-' + name);
     });
     if (name === 'map') {
       if (!mapInitialized) {
-        // Defer one frame so the browser has laid out the now-visible container
         requestAnimationFrame(initMap);
       } else if (leafletMap) {
         leafletMap.invalidateSize();
       }
     }
-    history.replaceState(null, '', location.pathname + location.search + '#' + name);
   }
 
   function initMap() {
     mapInitialized = true;
-    // Provide a default view so tiles load immediately; geolocation may override it
     leafletMap = L.map('map', { center: [20, 0], zoom: 2 });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -136,10 +96,9 @@
         radius: 10, color, fillColor: color, fillOpacity: 0.7, weight: 2
       }).addTo(leafletMap);
       const dl = v.median_download_mbps ? v.median_download_mbps.toFixed(1) + ' Mbps' : '—';
+      const label = v.name || v.ssid;
       marker.bindPopup(
-        `<strong><a href="/venues/${v.id}">${v.ssid}</a></strong><br>` +
-        (v.name ? v.name + '<br>' : '') +
-        `⬇ ${dl}`
+        `<strong><a href="/venues/${v.id}">${label}</a></strong><br>⬇ ${dl}`
       );
       bounds.push([v.lat, v.lng]);
     });
@@ -156,7 +115,9 @@
     leafletMap.invalidateSize();
   }
 
-  // Restore tab from URL hash on load
-  if (location.hash === '#map') switchTab('map');
+  // Show the right panel on load and whenever the hash changes
+  function syncPanel() { showPanel(location.hash === '#map' ? 'map' : 'list'); }
+  syncPanel();
+  window.addEventListener('hashchange', syncPanel);
 </script>
 {% endblock %}
