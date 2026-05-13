@@ -1,10 +1,15 @@
-# fly.toml app configuration file generated for wifibuddy on 2026-05-12T18:23:17-07:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# See https://fly.io/docs/reference/configuration/ for how to use this file.
 
 app = 'wifibuddy'
 primary_region = 'lax'
+
+[env]
+  # Tell db.py to look inside the mounted volume
+  DATABASE_PATH = "/data/wifibuddy.db"
+
+[mounts]
+  source = "wifibuddy_data"
+  destination = "/data"
 
 [build]
 
@@ -20,4 +25,3 @@ primary_region = 'lax'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 1024
