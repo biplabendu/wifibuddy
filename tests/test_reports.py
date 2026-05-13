@@ -95,3 +95,49 @@ def test_two_same_ssid_same_location_single_venue(client, conn):
     )
     assert r1.status_code == 303
     assert conn.execute("SELECT COUNT(*) FROM venues WHERE ssid='UniqueNet'").fetchone()[0] == 1
+
+
+# --- New UI: single "Wifi Name" field — specs/ui-redesign.md ---
+
+def test_submit_page_has_single_wifi_name_field(client):
+    """Submit page shows one text input (ssid / Wifi Name) and a nearby-places select."""
+    response = client.get("/submit")
+    assert response.status_code == 200
+    assert 'name="ssid"' in response.text
+    assert 'id="place-select"' in response.text
+    # The old separate venue-name input must be gone
+    assert 'name="name"' not in response.text
+
+
+def test_submission_without_name_mirrors_ssid(client, conn):
+    """When the new form posts only ssid, venues.name is set equal to ssid."""
+    client.post(
+        "/reports",
+        data={"ssid": "Blue Bottle Coffee", "download_mbps": "42.0", "upload_mbps": "9.0"},
+        follow_redirects=False,
+    )
+    row = conn.execute(
+        "SELECT ssid, name FROM venues WHERE ssid='Blue Bottle Coffee'"
+    ).fetchone()
+    assert row is not None
+    assert row["ssid"] == "Blue Bottle Coffee"
+    assert row["name"] == "Blue Bottle Coffee"
+
+
+def test_submission_with_explicit_name_preserved(client, conn):
+    """Legacy clients that still send `name` separately must have it preserved."""
+    client.post(
+        "/reports",
+        data={
+            "ssid": "GuestWifi_42",
+            "name": "Joe's Diner",
+            "download_mbps": "20.0",
+            "upload_mbps": "4.0",
+        },
+        follow_redirects=False,
+    )
+    row = conn.execute(
+        "SELECT ssid, name FROM venues WHERE ssid='GuestWifi_42'"
+    ).fetchone()
+    assert row is not None
+    assert row["name"] == "Joe's Diner"

@@ -20,7 +20,7 @@ async def submit_form(
     return templates.TemplateResponse(
         request,
         "submit.html",
-        {"ssid": ssid, "venue_id": venue_id, "errors": []},
+        {"ssid": ssid, "venue_id": venue_id, "errors": [], "nav_active": "report"},
     )
 
 
@@ -39,6 +39,9 @@ async def submit_report(request: Request):
     raw_lat = form.get("lat", "")
     raw_lng = form.get("lng", "")
     name = (form.get("name") or "").strip() or None
+    # When the submit form sends only one "Wifi Name" field (new UI), mirror it into name.
+    if name is None and ssid:
+        name = ssid
 
     errors = []
 
@@ -95,7 +98,7 @@ async def submit_report(request: Request):
         return templates.TemplateResponse(
             request,
             "submit.html",
-            {"ssid": ssid, "errors": errors},
+            {"ssid": ssid, "errors": errors, "nav_active": "report"},
             status_code=422,
         )
 
@@ -116,6 +119,7 @@ async def submit_report(request: Request):
                             "You've already submitted a report for this network recently. "
                             "Try again in an hour."
                         ],
+                        "nav_active": "report",
                     },
                     status_code=429,
                 )

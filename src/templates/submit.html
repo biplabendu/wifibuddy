@@ -1,14 +1,63 @@
 {% extends "base.html" %}
-{% block title %}Submit Speed — wifibuddy{% endblock %}
+{% block title %}Report — wifibuddy{% endblock %}
 {% block head %}
 <style>
-  #speedtest-progress { margin-top: 0.5rem; }
-  #speedtest-progress progress { width: 100%; height: 0.5rem; }
+  .loc-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.65rem 0.9rem;
+    border-radius: 10px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: var(--pico-muted-color);
+  }
+  .loc-bar.is-ok   { border-color: #16a34a44; background: #f0fdf4; color: #166534; }
+  .loc-bar.is-err  { border-color: #dc262644; background: #fef2f2; color: #991b1b; }
+  .loc-bar .loc-icon { font-size: 1.1rem; flex-shrink: 0; }
+  .loc-bar button {
+    margin: 0; padding: 0.25rem 0.75rem; font-size: 0.82rem;
+    line-height: 1.4; width: auto; white-space: nowrap;
+    border-radius: 999px;
+  }
+  #nearby-row { display: none; }
+  #nearby-row select { margin-bottom: 0.25rem; }
+  .runtest-row { display: flex; gap: 0.75rem; align-items: flex-end; margin-top: 0.5rem; }
+  .runtest-row label { flex: 1; margin-bottom: 0; }
+  .runtest-row button { white-space: nowrap; }
+  .name-field { position: relative; }
+  .edit-name-btn {
+    position: absolute;
+    right: 0.4rem;
+    top: 50%;
+    transform: translateY(-50%);
+    margin: 0;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    width: auto;
+    background: var(--pico-secondary-background);
+    color: var(--pico-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 999px;
+    cursor: pointer;
+    display: none;
+  }
+  .edit-name-btn:hover { background: var(--pico-primary); color: white; border-color: var(--pico-primary); }
+  #test-status { margin-top: 1rem; display: none; }
+  #test-status progress { width: 100%; height: 0.5rem; }
+  #test-results { margin-top: 1rem; display: none; }
+  .result-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1rem 0; }
+  .result-grid > div { text-align: center; padding: 0.75rem; background: var(--pico-card-background-color); border-radius: 6px; }
+  .result-grid .value { font-size: 1.4rem; font-weight: bold; color: var(--pico-primary); }
+  .result-grid .label { font-size: 0.85rem; color: var(--pico-muted-color); }
+  #submit-btn { display: none; }
 </style>
 {% endblock %}
 {% block content %}
-<h1>Submit a Speed Report</h1>
-<p>Connect to wifi, run a speed test, and share the results.</p>
+<h1>Report a Wifi Speed</h1>
 
 {% if errors %}
 <div role="alert" style="color:#dc2626; border:1px solid #dc2626; padding:1rem; border-radius:4px; margin-bottom:1rem;">
@@ -17,87 +66,209 @@
 </div>
 {% endif %}
 
-<form method="post" action="/reports">
+<!-- Location detection bar (auto-triggers on load) -->
+<div id="loc-bar" class="loc-bar">
+  <span class="loc-icon" id="loc-icon">📍</span>
+  <span id="loc-text" style="flex:1">Detecting your location…</span>
+  <button type="button" id="loc-retry-btn" style="display:none" onclick="detectLocation()">Retry</button>
+</div>
 
+<form method="post" action="/reports">
   <!-- Honeypot: hidden from humans, filled by bots -->
   <input type="text" name="honey" style="display:none" tabindex="-1" autocomplete="off">
 
-  <label>
-    Wifi network name (SSID)
-    <input type="text" name="ssid" value="{{ ssid }}" required maxlength="64"
-           placeholder="e.g. CoffeeShop_Guest">
-    <small>The network name shown in your wifi settings.</small>
-  </label>
-
-  <fieldset>
-    <legend>Speed test results</legend>
-    <p>
-      <button type="button" id="speedtest-btn" onclick="runSpeedTest()">
-        ⚡ Run Speed Test
-      </button>
-      <small style="margin-left:0.5rem">Uses M-Lab NDT7 — same method as official M-Lab measurements.</small>
-    </p>
-    <div id="speedtest-progress" style="display:none">
-      <progress id="speedtest-bar" value="0" max="100"></progress>
-      <small id="speedtest-status" style="display:block; margin-top:0.25rem"></small>
-    </div>
-    <div class="grid">
-      <label>
-        Download (Mbps)
-        <input type="number" name="download_mbps" id="download_mbps" step="0.1" min="0.1" max="9999" required
-               placeholder="e.g. 47.3">
-      </label>
-      <label>
-        Upload (Mbps)
-        <input type="number" name="upload_mbps" id="upload_mbps" step="0.1" min="0.1" max="9999" required
-               placeholder="e.g. 12.1">
-      </label>
-      <label>
-        Ping (ms) <small>optional</small>
-        <input type="number" name="ping_ms" id="ping_ms" step="1" min="1" max="59999"
-               placeholder="e.g. 14">
-      </label>
-    </div>
-  </fieldset>
-
-  <fieldset>
-    <legend>Location <small>optional</small></legend>
-    <input type="hidden" name="lat" id="lat">
-    <input type="hidden" name="lng" id="lng">
+  <!-- Nearby places dropdown — shown once location is known -->
+  <div id="nearby-row">
     <label>
-      Venue name <small>(cafe, library, etc.)</small>
-      <input type="text" name="name" maxlength="128"
-             placeholder="e.g. Blue Bottle Coffee on Main St"
-             id="venue-name" list="venue-datalist" autocomplete="off">
-      <datalist id="venue-datalist"></datalist>
-      <small>Detect your location to see nearby place suggestions as you type.</small>
+      Nearby Places <small style="color:var(--pico-muted-color)">(within 100 m)</small>
+      <select id="place-select" aria-label="Select a nearby place">
+        <option value="">— loading… —</option>
+      </select>
     </label>
-    <button type="button" class="secondary outline" onclick="getLocation()">
-      📍 Detect my location
-    </button>
-    <small id="location-status"></small>
-  </fieldset>
+  </div>
 
-  <button type="submit">Submit Report</button>
+  <div class="runtest-row">
+    <label class="name-field">
+      Wifi Name
+      <input type="text" name="ssid" id="ssid" value="{{ ssid }}" required maxlength="64"
+             placeholder="e.g. Blue Bottle Coffee" autocomplete="off">
+      <button type="button" id="edit-name-btn" class="edit-name-btn"
+              aria-label="Edit wifi name" title="Edit wifi name">✏️ Edit</button>
+    </label>
+    <button type="button" id="runtest-btn" onclick="runEverything()">⚡ Run Test</button>
+  </div>
+  <small id="hint">Select a nearby place above (or type a name), then click Run Test to measure your wifi.</small>
+
+  <!-- Hidden fields filled by the test pipeline -->
+  <input type="hidden" name="download_mbps" id="download_mbps">
+  <input type="hidden" name="upload_mbps"   id="upload_mbps">
+  <input type="hidden" name="ping_ms"       id="ping_ms">
+  <input type="hidden" name="lat"           id="lat">
+  <input type="hidden" name="lng"           id="lng">
+
+  <div id="test-status">
+    <progress id="test-bar" value="0" max="100"></progress>
+    <small id="test-stage" style="display:block; margin-top:0.25rem"></small>
+  </div>
+
+  <div id="test-results">
+    <div class="result-grid">
+      <div><div class="value" id="r-download">—</div><div class="label">Download (Mbps)</div></div>
+      <div><div class="value" id="r-upload">—</div><div class="label">Upload (Mbps)</div></div>
+      <div><div class="value" id="r-ping">—</div><div class="label">Ping (ms)</div></div>
+    </div>
+  </div>
+
+  <button type="submit" id="submit-btn">Submit Report</button>
 </form>
 {% endblock %}
 {% block scripts %}
 <script>
-// ── NDT7 speed test ───────────────────────────────────────────────────────────
+// Cached location from the initial detection
+let cachedCoords = null;
 
-async function runSpeedTest() {
-  const btn  = document.getElementById('speedtest-btn');
-  const bar  = document.getElementById('speedtest-bar');
-  const stat = document.getElementById('speedtest-status');
-  const div  = document.getElementById('speedtest-progress');
+document.getElementById('edit-name-btn').addEventListener('click', () => {
+  const input = document.getElementById('ssid');
+  input.focus();
+  input.select();
+});
 
-  btn.disabled = true;
-  div.style.display = 'block';
-  bar.value = 0;
+// ── Location + nearby places (auto-runs on load) ─────────────────────────────
+
+function setLocBar(state, text) {
+  const bar  = document.getElementById('loc-bar');
+  const icon = document.getElementById('loc-icon');
+  const span = document.getElementById('loc-text');
+  const retry = document.getElementById('loc-retry-btn');
+  bar.className = 'loc-bar' + (state === 'ok' ? ' is-ok' : state === 'err' ? ' is-err' : '');
+  icon.textContent = state === 'ok' ? '✅' : state === 'err' ? '⚠️' : '📍';
+  span.textContent = text;
+  retry.style.display = state === 'err' ? '' : 'none';
+}
+
+async function detectLocation() {
+  setLocBar('', 'Detecting your location…');
+  document.getElementById('loc-retry-btn').style.display = 'none';
+
+  if (!navigator.geolocation) {
+    setLocBar('err', 'Geolocation is not supported by this browser.');
+    return;
+  }
+
+  let pos;
+  try {
+    pos = await new Promise((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        timeout: 10000, enableHighAccuracy: true, maximumAge: 30000
+      })
+    );
+  } catch (e) {
+    setLocBar('err', 'Location access denied or unavailable. You can still type the wifi name manually.');
+    return;
+  }
+
+  cachedCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  document.getElementById('lat').value = cachedCoords.lat.toFixed(6);
+  document.getElementById('lng').value = cachedCoords.lng.toFixed(6);
+
+  setLocBar('', 'Loading nearby places…');
+  await populateNearbyDropdown(cachedCoords.lat, cachedCoords.lng);
+}
+
+async function populateNearbyDropdown(lat, lng) {
+  const row    = document.getElementById('nearby-row');
+  const sel    = document.getElementById('place-select');
 
   try {
-    // Locate nearest M-Lab server
-    stat.textContent = 'Finding nearest test server…';
+    const r = await fetch(`/api/venues/nearby?lat=${lat}&lng=${lng}&radius=100`);
+    if (!r.ok) throw new Error('API error');
+    const data = await r.json();
+    const suggestions = data.suggestions || [];
+
+    sel.innerHTML = '';
+
+    if (suggestions.length === 0) {
+      setLocBar('ok', `Location found — no named places within 100 m. Type the wifi name below.`);
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '— no places found nearby —';
+      sel.appendChild(opt);
+    } else {
+      setLocBar('ok', `Location found — ${suggestions.length} place${suggestions.length === 1 ? '' : 's'} within 100 m.`);
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '— select a nearby place —';
+      sel.appendChild(placeholder);
+
+      suggestions.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.name;
+        opt.textContent = s.distance_m != null
+          ? `${s.name}  (${s.distance_m} m)`
+          : s.name;
+        sel.appendChild(opt);
+      });
+
+      const other = document.createElement('option');
+      other.value = '__manual__';
+      other.textContent = 'Enter manually…';
+      sel.appendChild(other);
+
+      row.style.display = '';
+    }
+  } catch (_) {
+    setLocBar('ok', 'Location found — could not load nearby places. Type the wifi name below.');
+    sel.innerHTML = '<option value="">— could not load places —</option>';
+    row.style.display = '';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  detectLocation();
+
+  document.getElementById('place-select').addEventListener('change', function () {
+    const val = this.value;
+    if (!val || val === '__manual__') {
+      document.getElementById('ssid').value = '';
+      document.getElementById('ssid').focus();
+    } else {
+      document.getElementById('ssid').value = val;
+    }
+  });
+});
+
+// ── Orchestrator: one button → speed test (location already obtained) ─────────
+
+async function runEverything() {
+  const btn   = document.getElementById('runtest-btn');
+  const stat  = document.getElementById('test-status');
+  const stage = document.getElementById('test-stage');
+  const bar   = document.getElementById('test-bar');
+  const hint  = document.getElementById('hint');
+
+  btn.disabled = true;
+  stat.style.display = 'block';
+  bar.value = 0;
+  hint.textContent = '';
+
+  // Re-use cached coords; if not yet obtained, try once more
+  if (!cachedCoords) {
+    stage.textContent = 'Requesting location…';
+    try {
+      const pos = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
+      );
+      cachedCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      document.getElementById('lat').value = cachedCoords.lat.toFixed(6);
+      document.getElementById('lng').value = cachedCoords.lng.toFixed(6);
+    } catch (_) {
+      stage.textContent = 'Location skipped — running speed test…';
+    }
+  }
+  bar.value = 10;
+
+  try {
+    stage.textContent = 'Finding nearest test server…';
     const locResp = await fetch(
       'https://locate.measurementlab.net/v2/nearest/ndt/ndt7' +
       '?client.library.name=wifibuddy&client.library.version=0.1'
@@ -106,24 +277,22 @@ async function runSpeedTest() {
     const loc = await locResp.json();
     if (!loc.results || !loc.results.length) throw new Error('no servers available');
     const urls = loc.results[0].urls;
-    bar.value = 5;
+    bar.value = 15;
 
-    // Download (~10 s) — server streams data to us
     const { mbps: dlMbps, rttMs } = await ndt7Download(
       urls['wss:///ndt/v7/download'],
       (mbps, frac) => {
-        stat.textContent = `Download: ${mbps.toFixed(1)} Mbps…`;
-        bar.value = 5 + frac * 45;
+        stage.textContent = `Download: ${mbps.toFixed(1)} Mbps…`;
+        bar.value = 15 + frac * 45;
       }
     );
-    bar.value = 50;
+    bar.value = 60;
 
-    // Upload (~10 s) — we stream data to server
     const ulMbps = await ndt7Upload(
       urls['wss:///ndt/v7/upload'],
       (mbps, frac) => {
-        stat.textContent = `Upload: ${mbps.toFixed(1)} Mbps…`;
-        bar.value = 50 + frac * 50;
+        stage.textContent = `Upload: ${mbps.toFixed(1)} Mbps…`;
+        bar.value = 60 + frac * 40;
       }
     );
     bar.value = 100;
@@ -132,16 +301,22 @@ async function runSpeedTest() {
     document.getElementById('upload_mbps').value   = ulMbps.toFixed(1);
     if (rttMs != null) document.getElementById('ping_ms').value = rttMs;
 
-    stat.textContent =
-      `✓ Done — ↓ ${dlMbps.toFixed(1)} Mbps  ↑ ${ulMbps.toFixed(1)} Mbps` +
-      (rttMs != null ? `  ping ${rttMs} ms` : '');
+    document.getElementById('r-download').textContent = dlMbps.toFixed(1);
+    document.getElementById('r-upload').textContent   = ulMbps.toFixed(1);
+    document.getElementById('r-ping').textContent     = rttMs != null ? rttMs : '—';
+
+    stage.textContent = '✓ Done. Confirm the Wifi Name above, then submit.';
+    document.getElementById('test-results').style.display = 'block';
+    document.getElementById('submit-btn').style.display = 'inline-block';
+    document.getElementById('edit-name-btn').style.display = 'inline-block';
   } catch (e) {
-    stat.textContent = `Test failed (${e.message}) — enter values manually or use fast.com`;
+    stage.textContent = `Test failed (${e.message}). Try again.`;
   }
   btn.disabled = false;
 }
 
-// Returns { mbps, rttMs } — rttMs extracted from TCPInfo.MinRTT server messages (µs → ms)
+// ── NDT7 speed test (unchanged from prior implementation) ────────────────────
+
 function ndt7Download(url, onProgress) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url, 'net.measurementlab.ndt.v7');
@@ -156,7 +331,7 @@ function ndt7Download(url, onProgress) {
       } else {
         try {
           const msg = JSON.parse(e.data);
-          const rtt = msg.TCPInfo && msg.TCPInfo.MinRTT; // µs
+          const rtt = msg.TCPInfo && msg.TCPInfo.MinRTT;
           if (rtt > 0) minRttMs = Math.round(rtt / 1000);
         } catch (_) {}
       }
@@ -173,10 +348,9 @@ function ndt7Download(url, onProgress) {
   });
 }
 
-// Returns mbps — sends 1 MB chunks as fast as the buffer allows for 10 s
 function ndt7Upload(url, onProgress) {
   return new Promise((resolve, reject) => {
-    const CHUNK = new ArrayBuffer(1024 * 1024); // 1 MB, reused (WS copies on send)
+    const CHUNK = new ArrayBuffer(1024 * 1024);
     const ws = new WebSocket(url, 'net.measurementlab.ndt.v7');
     ws.binaryType = 'arraybuffer';
     let totalBytes = 0;
@@ -188,7 +362,6 @@ function ndt7Upload(url, onProgress) {
         if (ws.readyState !== WebSocket.OPEN) return;
         const elapsed = performance.now() - t0;
         if (elapsed >= 10000) { ws.close(); return; }
-        // Fill the send buffer up to 4 MB ahead, then yield
         while (ws.bufferedAmount < 4 * 1024 * 1024 && ws.readyState === WebSocket.OPEN) {
           ws.send(CHUNK);
           totalBytes += CHUNK.byteLength;
@@ -206,56 +379,6 @@ function ndt7Upload(url, onProgress) {
 
     ws.onerror = () => reject(new Error('upload error'));
   });
-}
-
-// ── Location + venue suggestions ─────────────────────────────────────────────
-
-function getLocation() {
-  const status = document.getElementById('location-status');
-  if (!navigator.geolocation) {
-    status.textContent = 'Geolocation not supported by your browser.';
-    return;
-  }
-  status.textContent = 'Detecting location…';
-  navigator.geolocation.getCurrentPosition(
-    pos => {
-      document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
-      document.getElementById('lng').value = pos.coords.longitude.toFixed(6);
-      status.textContent = '✓ Location captured. Loading nearby places…';
-      fetchNearby(pos.coords.latitude, pos.coords.longitude);
-    },
-    () => { status.textContent = 'Could not detect location.'; }
-  );
-}
-
-function fetchNearby(lat, lng) {
-  const key = `nearby:${lat.toFixed(3)},${lng.toFixed(3)}`;
-  const cached = sessionStorage.getItem(key);
-  if (cached) { populateSuggestions(JSON.parse(cached)); return; }
-  fetch(`/api/venues/nearby?lat=${lat}&lng=${lng}`)
-    .then(r => r.json())
-    .then(data => {
-      const suggestions = data.suggestions || [];
-      sessionStorage.setItem(key, JSON.stringify(suggestions));
-      populateSuggestions(suggestions);
-    })
-    .catch(() => {
-      document.getElementById('location-status').textContent = '✓ Location captured.';
-    });
-}
-
-function populateSuggestions(suggestions) {
-  const dl = document.getElementById('venue-datalist');
-  dl.innerHTML = '';
-  suggestions.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s.name;
-    if (s.distance_m != null) opt.label = `${s.distance_m} m away`;
-    dl.appendChild(opt);
-  });
-  document.getElementById('location-status').textContent = suggestions.length
-    ? `✓ Location captured — ${suggestions.length} nearby places loaded. Start typing the venue name.`
-    : '✓ Location captured.';
 }
 </script>
 {% endblock %}

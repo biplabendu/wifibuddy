@@ -4,32 +4,144 @@
 {% block head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  .tabs {
+  .browse-layout {
     display: flex;
-    gap: 0;
-    border-bottom: 2px solid var(--pico-muted-border-color);
-    margin-bottom: 1.5rem;
+    flex-direction: column;
+    gap: 1.25rem;
   }
-  .tab-btn {
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    padding: 0.6rem 1.75rem;
-    margin-bottom: -2px;
+  #tab-map {
+    position: relative;
+    order: -1;
+  }
+  #map {
+    height: min(55vh, 480px);
+    border-radius: 14px;
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.06),
+      0 10px 28px -12px rgba(15, 23, 42, 0.18);
+    overflow: hidden;
+    background: #eef2f7;
+  }
+  /* Soft, modern tile rendering */
+  #map .leaflet-tile-pane { filter: saturate(0.95) contrast(0.96); }
+  #map .leaflet-control-attribution {
+    font-size: 0.7rem;
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(6px);
+    border-radius: 6px 0 0 0;
+  }
+  /* Marker glow */
+  #map .leaflet-interactive { filter: drop-shadow(0 1px 2px rgba(15,23,42,0.25)); }
+  /* Popup polish */
+  #map .leaflet-popup-content-wrapper {
+    border-radius: 10px;
+    box-shadow: 0 10px 24px -10px rgba(15, 23, 42, 0.35);
+    padding: 0.15rem 0.25rem;
+  }
+  #map .leaflet-popup-content { margin: 0.6rem 0.85rem; font-size: 0.92rem; line-height: 1.35; }
+  #map .leaflet-popup-content a { font-weight: 600; }
+  #map .leaflet-popup-content .pop-meta { color: #475569; font-size: 0.82rem; margin-top: 0.15rem; }
+  #map .leaflet-popup-tip { box-shadow: none; }
+
+  #tab-list table { margin-bottom: 0.5rem; }
+  #tab-list tbody tr { cursor: pointer; transition: background 0.12s; }
+  #tab-list tbody tr:hover { background: var(--pico-secondary-background); }
+  #tab-list tbody tr.selected {
+    background: var(--pico-primary-background);
+    outline: 2px solid var(--pico-primary);
+    outline-offset: -2px;
+  }
+  #tab-list tbody tr[data-has-coords="false"] { cursor: default; }
+  #tab-list tbody tr[data-has-coords="false"]:hover { background: transparent; }
+
+  /* Locate-me control */
+  .locate-ctrl { background: transparent; border: none; }
+  .locate-btn {
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 10px;
+    padding: 0;
     cursor: pointer;
-    font-size: 1rem;
+    color: #1d4ed8;
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.08),
+      0 6px 16px -8px rgba(15, 23, 42, 0.25);
+    transition: transform 0.08s ease, background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .locate-btn:hover { background: #f8fafc; transform: translateY(-1px); }
+  .locate-btn:active { transform: translateY(0); }
+  .locate-btn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  .locate-btn.is-active { background: #1d4ed8; color: white; border-color: #1d4ed8; }
+  .locate-btn[disabled] { cursor: progress; }
+  .locate-btn svg { width: 18px; height: 18px; }
+  .locate-btn.is-loading svg { animation: locate-spin 0.9s linear infinite; }
+  @keyframes locate-spin { to { transform: rotate(360deg); } }
+
+  /* "You are here" pulsing marker */
+  .user-dot {
+    width: 14px;
+    height: 14px;
+    background: #2563eb;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.25);
+  }
+  .user-dot::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid rgba(37, 99, 235, 0.45);
+    animation: user-pulse 1.8s ease-out infinite;
+  }
+  @keyframes user-pulse {
+    0% { transform: scale(0.7); opacity: 0.9; }
+    100% { transform: scale(1.8); opacity: 0; }
+  }
+
+  /* Map legend */
+  .map-legend {
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(15,23,42,0.08);
+    border-radius: 10px;
+    padding: 0.45rem 0.6rem;
+    font-size: 0.78rem;
+    color: #334155;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.06), 0 6px 16px -10px rgba(15,23,42,0.22);
+    display: flex;
+    gap: 0.7rem;
+    align-items: center;
+  }
+  .map-legend .swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-right: 0.25rem;
+    vertical-align: middle;
+  }
+
+  #locate-msg {
+    display: none;
+    margin-top: 0.5rem;
     color: var(--pico-muted-color);
-    transition: color 0.15s, border-color 0.15s;
+    font-size: 0.9rem;
   }
-  .tab-btn:hover { color: var(--pico-primary); }
-  .tab-btn.active {
-    border-bottom-color: var(--pico-primary);
-    color: var(--pico-primary);
-    font-weight: 600;
+  @media (min-width: 900px) {
+    .browse-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    #tab-map { order: 0; position: sticky; top: 1rem; }
+    #map { height: min(70vh, 600px); }
   }
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
-  #map { height: 65vh; border-radius: 8px; }
 </style>
 {% endblock %}
 
@@ -40,55 +152,49 @@
      <a href="/submit">Submit your result →</a></p>
 </hgroup>
 
-<div class="tabs" role="tablist">
-  <button class="tab-btn active" role="tab" aria-controls="tab-list" aria-selected="true"
-          onclick="switchTab('list')">📋 List</button>
-  <button class="tab-btn"        role="tab" aria-controls="tab-map"  aria-selected="false"
-          onclick="switchTab('map')">🗺️ Map</button>
-</div>
+<div class="browse-layout">
+  <div id="tab-list" role="region" aria-label="Venue list">
+    {% if venues %}
+    <figure>
+      <table>
+        <thead>
+          <tr>
+            <th>Wifi Name</th>
+            <th>Download</th>
+            <th>Reports</th>
+            <th>Last seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in venues %}
+          <tr data-venue-id="{{ v.id }}"
+              data-has-coords="{{ 'true' if v.lat is not none and v.lng is not none else 'false' }}"
+              {% if v.lat is not none and v.lng is not none %}data-lat="{{ v.lat }}" data-lng="{{ v.lng }}"{% endif %}>
+            <td><a href="/venues/{{ v.id }}">{{ v.name or v.ssid }}</a></td>
+            <td>
+              <span class="speed-{{ v.speed_class }}">
+                {% if v.median_download_mbps %}{{ "%.1f"|format(v.median_download_mbps) }} Mbps{% else %}—{% endif %}
+              </span>
+            </td>
+            <td>{{ v.report_count }}</td>
+            <td>{{ v.last_reported_ago }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </figure>
+    {% if has_next %}
+    <a href="/?page={{ page + 1 }}" role="button" class="secondary outline">Load more</a>
+    {% endif %}
+    {% else %}
+    <p>No speed reports yet. <a href="/submit">Be the first to submit one!</a></p>
+    {% endif %}
+  </div>
 
-<!-- List tab -->
-<div id="tab-list" class="tab-panel active" role="tabpanel">
-  {% if venues %}
-  <figure>
-    <table>
-      <thead>
-        <tr>
-          <th>Network (SSID)</th>
-          <th>Venue</th>
-          <th>Download</th>
-          <th>Reports</th>
-          <th>Last seen</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for v in venues %}
-        <tr>
-          <td><a href="/venues/{{ v.id }}">{{ v.ssid }}</a></td>
-          <td>{{ v.name or "—" }}</td>
-          <td>
-            <span class="speed-{{ v.speed_class }}">
-              {% if v.median_download_mbps %}{{ "%.1f"|format(v.median_download_mbps) }} Mbps{% else %}—{% endif %}
-            </span>
-          </td>
-          <td>{{ v.report_count }}</td>
-          <td>{{ v.last_reported_ago }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </figure>
-  {% if has_next %}
-  <a href="/?page={{ page + 1 }}" role="button" class="secondary outline">Load more</a>
-  {% endif %}
-  {% else %}
-  <p>No speed reports yet. <a href="/submit">Be the first to submit one!</a></p>
-  {% endif %}
-</div>
-
-<!-- Map tab -->
-<div id="tab-map" class="tab-panel" role="tabpanel">
-  <div id="map"></div>
+  <div id="tab-map" role="region" aria-label="Venue map">
+    <div id="map"></div>
+    <div id="locate-msg" role="status"></div>
+  </div>
 </div>
 {% endblock %}
 
@@ -96,67 +202,238 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
   const venues = {{ venues | tojson }};
-  let mapInitialized = false;
+  const markersById = new Map();
+  const colors = { fast: '#16a34a', ok: '#d97706', slow: '#dc2626', unknown: '#64748b' };
+  const LOCATE_ICON_SVG = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"></circle>
+      <line x1="12" y1="2"  x2="12" y2="5"></line>
+      <line x1="12" y1="19" x2="12" y2="22"></line>
+      <line x1="2"  y1="12" x2="5"  y2="12"></line>
+      <line x1="19" y1="12" x2="22" y2="12"></line>
+    </svg>`;
   let leafletMap = null;
-
-  function switchTab(name) {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      const active = btn.getAttribute('aria-controls') === 'tab-' + name;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-selected', active);
-    });
-    document.querySelectorAll('.tab-panel').forEach(panel => {
-      panel.classList.toggle('active', panel.id === 'tab-' + name);
-    });
-    if (name === 'map') {
-      if (!mapInitialized) {
-        // Defer one frame so the browser has laid out the now-visible container
-        requestAnimationFrame(initMap);
-      } else if (leafletMap) {
-        leafletMap.invalidateSize();
-      }
-    }
-    history.replaceState(null, '', location.pathname + location.search + '#' + name);
-  }
+  let userMarker = null;
+  let locateButton = null;
+  let selectedId = null;
+  let initialAutoLocateActive = true;
 
   function initMap() {
-    mapInitialized = true;
-    // Provide a default view so tiles load immediately; geolocation may override it
-    leafletMap = L.map('map', { center: [20, 0], zoom: 2 });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(leafletMap);
+    leafletMap = L.map('map', {
+      center: [20, 0],
+      zoom: 2,
+      zoomControl: false,
+      worldCopyJump: true,
+    });
+    L.control.zoom({ position: 'topleft' }).addTo(leafletMap);
 
-    const colors = { fast: '#2d9614', ok: '#b45309', slow: '#dc2626', unknown: '#6b7280' };
+    L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      {
+        attribution:
+          '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · ' +
+          '© <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19,
+      }
+    ).addTo(leafletMap);
+
     const bounds = [];
     venues.forEach(v => {
       if (v.lat == null || v.lng == null) return;
       const color = colors[v.speed_class] || colors.unknown;
       const marker = L.circleMarker([v.lat, v.lng], {
-        radius: 10, color, fillColor: color, fillOpacity: 0.7, weight: 2
+        radius: 9,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.92,
       }).addTo(leafletMap);
       const dl = v.median_download_mbps ? v.median_download_mbps.toFixed(1) + ' Mbps' : '—';
+      const label = v.name || v.ssid;
       marker.bindPopup(
-        `<strong><a href="/venues/${v.id}">${v.ssid}</a></strong><br>` +
-        (v.name ? v.name + '<br>' : '') +
-        `⬇ ${dl}`
+        `<strong><a href="/venues/${v.id}">${label}</a></strong>` +
+        `<div class="pop-meta">⬇ ${dl} · ${v.report_count} report${v.report_count === 1 ? '' : 's'}</div>`,
+        { closeButton: false, offset: [0, -2] }
       );
+      marker.on('mouseover', () => highlightRow(v.id, true));
+      marker.on('mouseout', () => highlightRow(v.id, false));
+      marker.on('click', () => {
+        const row = document.querySelector(`tr[data-venue-id="${v.id}"]`);
+        if (row) selectRow(v.id, row, { fly: false });
+      });
+      markersById.set(v.id, marker);
       bounds.push([v.lat, v.lng]);
     });
 
     if (bounds.length) leafletMap.fitBounds(bounds, { padding: [40, 40] });
 
+    addLocateControl();
+    addLegendControl();
+
+    // Initial best-effort auto-locate. Cancel if user pans/zooms first.
+    leafletMap.once('movestart zoomstart', () => { initialAutoLocateActive = false; });
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        pos => leafletMap.setView([pos.coords.latitude, pos.coords.longitude], 14),
-        () => {}
+        pos => {
+          if (!initialAutoLocateActive) return;
+          leafletMap.setView([pos.coords.latitude, pos.coords.longitude], 14);
+        },
+        () => {},
+        { timeout: 8000, maximumAge: 60_000 }
       );
     }
 
-    leafletMap.invalidateSize();
+    setTimeout(() => leafletMap.invalidateSize(), 0);
   }
 
-  // Restore tab from URL hash on load
-  if (location.hash === '#map') switchTab('map');
+  function addLocateControl() {
+    const Locate = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd: function () {
+        const wrap = L.DomUtil.create('div', 'leaflet-bar locate-ctrl');
+        const btn = L.DomUtil.create('button', 'locate-btn', wrap);
+        btn.type = 'button';
+        btn.setAttribute('aria-label', 'Locate me');
+        btn.title = 'Locate me';
+        btn.innerHTML = LOCATE_ICON_SVG;
+        L.DomEvent
+          .disableClickPropagation(wrap)
+          .disableScrollPropagation(wrap)
+          .on(btn, 'click', L.DomEvent.stop)
+          .on(btn, 'click', locateUser);
+        locateButton = btn;
+        return wrap;
+      }
+    });
+    leafletMap.addControl(new Locate());
+  }
+
+  function addLegendControl() {
+    const Legend = L.Control.extend({
+      options: { position: 'bottomleft' },
+      onAdd: function () {
+        const el = L.DomUtil.create('div', 'map-legend');
+        el.innerHTML =
+          `<span><span class="swatch" style="background:${colors.fast}"></span>Fast</span>` +
+          `<span><span class="swatch" style="background:${colors.ok}"></span>OK</span>` +
+          `<span><span class="swatch" style="background:${colors.slow}"></span>Slow</span>`;
+        L.DomEvent.disableClickPropagation(el);
+        return el;
+      }
+    });
+    leafletMap.addControl(new Legend());
+  }
+
+  function locateUser() {
+    const btn = locateButton;
+    const msg = document.getElementById('locate-msg');
+    msg.style.display = 'none';
+    initialAutoLocateActive = false;
+    if (!navigator.geolocation) {
+      showLocateMessage("Geolocation isn't available in this browser.");
+      return;
+    }
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        btn.classList.remove('is-loading');
+        btn.classList.add('is-active');
+        btn.disabled = false;
+        const ll = [pos.coords.latitude, pos.coords.longitude];
+        leafletMap.flyTo(ll, Math.max(leafletMap.getZoom(), 14), { duration: 0.8 });
+        if (userMarker) {
+          userMarker.setLatLng(ll);
+        } else {
+          const icon = L.divIcon({
+            className: 'user-marker',
+            html: '<div class="user-dot"></div>',
+            iconSize: [14, 14],
+            iconAnchor: [7, 7],
+          });
+          userMarker = L.marker(ll, { icon, interactive: true })
+            .addTo(leafletMap)
+            .bindPopup('You are here');
+        }
+      },
+      () => {
+        btn.classList.remove('is-loading');
+        btn.disabled = false;
+        showLocateMessage("Couldn't get your location.");
+      },
+      { timeout: 8000, enableHighAccuracy: true, maximumAge: 30_000 }
+    );
+  }
+
+  function showLocateMessage(text) {
+    const msg = document.getElementById('locate-msg');
+    msg.textContent = text;
+    msg.style.display = 'block';
+    setTimeout(() => { msg.style.display = 'none'; }, 4000);
+  }
+
+  function highlightRow(venueId, on) {
+    const row = document.querySelector(`tr[data-venue-id="${venueId}"]`);
+    if (!row) return;
+    row.classList.toggle('hover-from-map', on);
+    if (on) row.style.background = 'var(--pico-secondary-background)';
+    else if (!row.classList.contains('selected')) row.style.background = '';
+  }
+
+  const MARKER_BASE = { weight: 2, radius: 9 };
+  const MARKER_HOVER = { weight: 3, radius: 12 };
+
+  function highlightMarker(venueId, on) {
+    const marker = markersById.get(venueId);
+    if (!marker) return;
+    if (on) {
+      marker.setStyle(MARKER_HOVER);
+      marker.bringToFront();
+    } else if (selectedId !== venueId) {
+      marker.setStyle(MARKER_BASE);
+    }
+  }
+
+  function selectRow(venueId, row, opts = {}) {
+    const { fly = true } = opts;
+    if (selectedId !== null && selectedId !== venueId) {
+      const prevMarker = markersById.get(selectedId);
+      if (prevMarker) prevMarker.setStyle(MARKER_BASE);
+      const prevRow = document.querySelector(`tr[data-venue-id="${selectedId}"]`);
+      if (prevRow) prevRow.classList.remove('selected');
+    }
+    selectedId = venueId;
+    row.classList.add('selected');
+    const marker = markersById.get(venueId);
+    if (!marker) return;
+    if (fly) {
+      const lat = parseFloat(row.dataset.lat);
+      const lng = parseFloat(row.dataset.lng);
+      if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+        leafletMap.flyTo([lat, lng], Math.max(leafletMap.getZoom(), 15), { duration: 0.6 });
+      }
+    }
+    marker.setStyle(MARKER_HOVER);
+    marker.bringToFront();
+    marker.openPopup();
+  }
+
+  function wireRowInteractions() {
+    document.querySelectorAll('#tab-list tbody tr[data-has-coords="true"]').forEach(row => {
+      const venueId = parseInt(row.dataset.venueId, 10);
+      row.addEventListener('mouseenter', () => highlightMarker(venueId, true));
+      row.addEventListener('mouseleave', () => highlightMarker(venueId, false));
+      row.addEventListener('click', e => {
+        // Don't hijack the venue-name link
+        if (e.target.closest('a')) return;
+        selectRow(venueId, row);
+      });
+    });
+  }
+
+  initMap();
+  wireRowInteractions();
 </script>
 {% endblock %}
