@@ -70,7 +70,7 @@ async def index(request: Request, page: int = 1):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"venues": page_venues, "page": page, "has_next": has_next, "nav_active": "list"},
+        {"venues": page_venues, "page": page, "has_next": has_next, "nav_active": "browse"},
     )
 
 
@@ -150,7 +150,7 @@ async def api_venues(request: Request, page: int = 1, bbox: Optional[str] = None
 
 
 @router.get("/api/venues/nearby")
-async def api_venues_nearby(lat: float, lng: float, radius: int = 200):
+async def api_venues_nearby(lat: float, lng: float, radius: int = 100):
     conn = db.get_conn()
     try:
         rows = conn.execute(
@@ -172,7 +172,6 @@ async def api_venues_nearby(lat: float, lng: float, radius: int = 200):
                     }
                 )
         nearby.sort(key=lambda x: x["distance_m"])
-        nearby = nearby[:5]
     finally:
         conn.close()
 
@@ -183,26 +182,22 @@ async def api_venues_nearby(lat: float, lng: float, radius: int = 200):
         if v["name"]
     ]
 
-    # Supplement with OSM places when local results are sparse
-    if len(suggestions) < 3:
-        osm = await _osm_nearby(lat, lng, radius)
-        seen = {s["name"] for s in suggestions}
-        for place in osm:
-            if place["name"] not in seen:
-                suggestions.append({"name": place["name"], "distance_m": place.get("distance_m")})
+    # Include all named OSM places within the radius regardless of category
+    osm = await _osm_nearby(lat, lng, radius)
+    seen = {s["name"] for s in suggestions}
+    for place in osm:
+        if place["name"] not in seen:
+            suggestions.append({"name": place["name"], "distance_m": place.get("distance_m")})
 
     return JSONResponse(
-        {"venues": nearby, "suggestions": suggestions[:8]},
+        {"venues": nearby, "suggestions": suggestions},
         headers=_CORS,
     )
 
 
 async def _osm_nearby(lat: float, lng: float, radius: int) -> list[dict]:
-    query = (
-        f"[out:json][timeout:8];"
-        f'node["amenity"~"cafe|restaurant|library|coworking"](around:{radius},{lat},{lng});'
-        f"out 8;"
-    )
+    # Search for all nodes with a name within the radius, removing type filters
+    query = f'[out:json][timeout:8];node["name"](around:{radius},{lat},{lng});out;'
     try:
         import httpx
         async with httpx.AsyncClient() as client:

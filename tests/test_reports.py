@@ -100,12 +100,11 @@ def test_two_same_ssid_same_location_single_venue(client, conn):
 # --- New UI: single "Wifi Name" field — specs/ui-redesign.md ---
 
 def test_submit_page_has_single_wifi_name_field(client):
-    """Submit page shows one text input (ssid / Wifi Name) and no separate venue name input."""
+    """Submit page shows one text input (ssid / Wifi Name) and a nearby-places select."""
     response = client.get("/submit")
     assert response.status_code == 200
     assert 'name="ssid"' in response.text
-    assert 'list="venue-datalist"' in response.text
-    assert '<datalist id="venue-datalist">' in response.text
+    assert 'id="place-select"' in response.text
     # The old separate venue-name input must be gone
     assert 'name="name"' not in response.text
 

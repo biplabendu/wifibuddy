@@ -1,0 +1,11 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
+*.db
+.DS_Store
+.git
+tests/
+specs/
