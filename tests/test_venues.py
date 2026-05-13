@@ -1,5 +1,12 @@
 """Tests for specs/browse-venues.md acceptance criteria."""
+import re
+
 from tests.conftest import seed_venue
+
+
+def _tab_is_active(html: str, tab: str) -> bool:
+    pattern = rf'<a[^>]*data-tab="{tab}"[^>]*class="[^"]*\bactive\b'
+    return re.search(pattern, html) is not None
 
 
 def test_index_returns_200_with_venue(client, conn):
@@ -82,3 +89,25 @@ def test_homepage_has_both_list_and_map_tabs(client, conn):
     assert "tab-map" in response.text
     assert "<table>" in response.text
     assert "leaflet" in response.text.lower()
+
+
+def test_global_nav_has_three_tabs(client):
+    """Report/List/Map nav tabs are present in the header on every page."""
+    for path in ("/", "/submit"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert 'data-tab="report"' in response.text
+        assert 'data-tab="list"'   in response.text
+        assert 'data-tab="map"'    in response.text
+
+
+def test_list_tab_active_on_homepage(client):
+    response = client.get("/")
+    assert _tab_is_active(response.text, "list")
+    assert not _tab_is_active(response.text, "report")
+
+
+def test_report_tab_active_on_submit(client):
+    response = client.get("/submit")
+    assert _tab_is_active(response.text, "report")
+    assert not _tab_is_active(response.text, "list")
