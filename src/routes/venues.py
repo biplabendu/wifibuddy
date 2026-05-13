@@ -150,7 +150,8 @@ async def api_venues(request: Request, page: int = 1, bbox: Optional[str] = None
 
 
 @router.get("/api/venues/nearby")
-async def api_venues_nearby(lat: float, lng: float, radius: int = 100):
+async def api_venues_nearby(lat: float, lng: float, radius: int = config.NEARBY_RADIUS_DEFAULT_M):
+    radius = max(config.NEARBY_RADIUS_MIN_M, min(radius, config.NEARBY_RADIUS_MAX_M))
     conn = db.get_conn()
     try:
         rows = conn.execute(
@@ -161,6 +162,7 @@ async def api_venues_nearby(lat: float, lng: float, radius: int = 100):
         for v in rows:
             dist = db.haversine_m(lat, lng, v["lat"], v["lng"])
             if dist <= radius:
+                stats = db.venue_stats(conn, v["id"])
                 nearby.append(
                     {
                         "id": v["id"],
@@ -169,6 +171,7 @@ async def api_venues_nearby(lat: float, lng: float, radius: int = 100):
                         "lat": v["lat"],
                         "lng": v["lng"],
                         "distance_m": round(dist),
+                        "median_download_mbps": stats["median_download_mbps"],
                     }
                 )
         nearby.sort(key=lambda x: x["distance_m"])
@@ -189,15 +192,44 @@ async def api_venues_nearby(lat: float, lng: float, radius: int = 100):
         if place["name"] not in seen:
             suggestions.append({"name": place["name"], "distance_m": place.get("distance_m")})
 
+    # Build pins list for map display
+    pins = []
+    pins_names = set()
+    for v in nearby:
+        pin_name = v["name"] or v["ssid"]
+        pins.append({
+            "name": pin_name,
+            "lat": v["lat"],
+            "lng": v["lng"],
+            "source": "wifibuddy",
+            "median_download_mbps": v["median_download_mbps"],
+        })
+        pins_names.add(pin_name)
+    for place in osm:
+        if place["lat"] is not None and place["lng"] is not None and place["name"] not in pins_names:
+            pins.append({
+                "name": place["name"],
+                "lat": place["lat"],
+                "lng": place["lng"],
+                "source": "osm",
+                "median_download_mbps": None,
+            })
+
     return JSONResponse(
-        {"venues": nearby, "suggestions": suggestions},
+        {"venues": nearby, "suggestions": suggestions, "pins": pins},
         headers=_CORS,
     )
 
 
 async def _osm_nearby(lat: float, lng: float, radius: int) -> list[dict]:
-    # Search for all nodes with a name within the radius, removing type filters
-    query = f'[out:json][timeout:8];node["name"](around:{radius},{lat},{lng});out;'
+    # Query both nodes and ways — most cafes/shops in OSM are ways (polygons), not nodes.
+    # `out center` returns a center lat/lon for ways so we can compute distance.
+    query = (
+        f'[out:json][timeout:8];'
+        f'(node["name"](around:{radius},{lat},{lng});'
+        f'way["name"](around:{radius},{lat},{lng}););'
+        f'out center;'
+    )
     try:
         import httpx
         async with httpx.AsyncClient() as client:
@@ -208,18 +240,23 @@ async def _osm_nearby(lat: float, lng: float, radius: int) -> list[dict]:
             )
         if resp.status_code != 200:
             return []
-        return [
-            {
-                "name": el["tags"]["name"],
-                "lat": el.get("lat"),
-                "lng": el.get("lon"),
-                "distance_m": round(db.haversine_m(lat, lng, el["lat"], el["lon"]))
-                if el.get("lat") and el.get("lon")
+        results = []
+        for el in resp.json().get("elements", []):
+            name = el.get("tags", {}).get("name")
+            if not name:
+                continue
+            # nodes expose lat/lon directly; ways expose them under "center"
+            el_lat = el.get("lat") or (el.get("center") or {}).get("lat")
+            el_lon = el.get("lon") or (el.get("center") or {}).get("lon")
+            results.append({
+                "name": name,
+                "lat": el_lat,
+                "lng": el_lon,
+                "distance_m": round(db.haversine_m(lat, lng, el_lat, el_lon))
+                if el_lat and el_lon
                 else None,
-            }
-            for el in resp.json().get("elements", [])
-            if el.get("tags", {}).get("name")
-        ]
+            })
+        return results
     except Exception:
         return []
 

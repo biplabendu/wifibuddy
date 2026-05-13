@@ -1,6 +1,28 @@
 {% extends "base.html" %}
 {% block title %}Report — wifibuddy{% endblock %}
 {% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  #page-header { display: flex; flex-direction: row; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  #page-header h1 { margin: 0; }
+  #map-toggle-btn { display: none; margin: 0; }
+  #page-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
+  #form-col { flex: 0 0 420px; max-width: 420px; }
+  #map-panel { flex: 1; min-width: 0; display: none; }
+  #map-container { height: 520px; border-radius: 10px; overflow: hidden; border: 1px solid var(--pico-muted-border-color); position: sticky; top: 1rem; }
+  .map-pin-wrap { background: none !important; border: none !important; }
+  .map-pin { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; font-weight: 700; color: white; border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,0.35); cursor: pointer; line-height: 1; }
+  @media (min-width: 801px) {
+    /* On desktop the map is always visible — hide the toggle button */
+    #map-toggle-btn { display: none !important; }
+  }
+  @media (max-width: 800px) {
+    #page-layout { flex-direction: column; }
+    #form-col { flex: none; width: 100%; max-width: 100%; }
+    #map-panel { width: 100%; }
+    #map-container { width: 100%; height: 320px; position: static; }
+  }
+</style>
 <style>
   .loc-bar {
     display: flex;
@@ -22,8 +44,6 @@
     line-height: 1.4; width: auto; white-space: nowrap;
     border-radius: 999px;
   }
-  #nearby-row { display: none; }
-  #nearby-row select { margin-bottom: 0.25rem; }
   .runtest-row { display: flex; gap: 0.75rem; align-items: flex-end; margin-top: 0.5rem; }
   .runtest-row label { flex: 1; margin-bottom: 0; }
   .runtest-row button { white-space: nowrap; }
@@ -54,10 +74,23 @@
   .result-grid .value { font-size: 1.4rem; font-weight: bold; color: var(--pico-primary); }
   .result-grid .label { font-size: 0.85rem; color: var(--pico-muted-color); }
   #submit-btn { display: none; }
+  #radius-row {
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.88rem;
+    color: var(--pico-muted-color);
+  }
+  #radius-row input[type=range] { flex: 1; margin: 0; }
+  #radius-label { white-space: nowrap; min-width: 5rem; text-align: right; }
 </style>
 {% endblock %}
 {% block content %}
-<h1>Report a Wifi Speed</h1>
+<div id="page-header">
+  <h1>Report a Wifi Speed</h1>
+  <button type="button" id="map-toggle-btn" class="outline secondary" onclick="toggleMap()">🗺️ Show Map</button>
+</div>
 
 {% if errors %}
 <div role="alert" style="color:#dc2626; border:1px solid #dc2626; padding:1rem; border-radius:4px; margin-bottom:1rem;">
@@ -66,6 +99,9 @@
 </div>
 {% endif %}
 
+<div id="page-layout">
+<div id="form-col">
+
 <!-- Location detection bar (auto-triggers on load) -->
 <div id="loc-bar" class="loc-bar">
   <span class="loc-icon" id="loc-icon">📍</span>
@@ -73,31 +109,30 @@
   <button type="button" id="loc-retry-btn" style="display:none" onclick="detectLocation()">Retry</button>
 </div>
 
+<div id="radius-row">
+  <span>Search radius</span>
+  <input type="range" id="radius-slider"
+         min="{{ radius_min }}" max="{{ radius_max }}"
+         step="{{ radius_step }}" value="{{ radius_default }}">
+  <span id="radius-label">{{ radius_default }} m</span>
+</div>
+
 <form method="post" action="/reports">
   <!-- Honeypot: hidden from humans, filled by bots -->
   <input type="text" name="honey" style="display:none" tabindex="-1" autocomplete="off">
-
-  <!-- Nearby places dropdown — shown once location is known -->
-  <div id="nearby-row">
-    <label>
-      Nearby Places <small style="color:var(--pico-muted-color)">(within 100 m)</small>
-      <select id="place-select" aria-label="Select a nearby place">
-        <option value="">— loading… —</option>
-      </select>
-    </label>
-  </div>
 
   <div class="runtest-row">
     <label class="name-field">
       Wifi Name
       <input type="text" name="ssid" id="ssid" value="{{ ssid }}" required maxlength="64"
-             placeholder="e.g. Blue Bottle Coffee" autocomplete="off">
+             placeholder="e.g. Blue Bottle Coffee" list="place-suggestions" autocomplete="off">
+      <datalist id="place-suggestions"></datalist>
       <button type="button" id="edit-name-btn" class="edit-name-btn"
               aria-label="Edit wifi name" title="Edit wifi name">✏️ Edit</button>
     </label>
     <button type="button" id="runtest-btn" onclick="runEverything()">⚡ Run Test</button>
   </div>
-  <small id="hint">Select a nearby place above (or type a name), then click Run Test to measure your wifi.</small>
+  <small id="hint">Type or pick a nearby place, then click Run Test to measure your wifi.</small>
 
   <!-- Hidden fields filled by the test pipeline -->
   <input type="hidden" name="download_mbps" id="download_mbps">
@@ -121,16 +156,158 @@
 
   <button type="submit" id="submit-btn">Submit Report</button>
 </form>
+
+</div><!-- /#form-col -->
+<div id="map-panel">
+  <div id="map-container"></div>
+</div>
+</div><!-- /#page-layout -->
 {% endblock %}
 {% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // Cached location from the initial detection
 let cachedCoords = null;
+let radiusDebounce = null;
+
+// Map state
+let leafletMap = null;
+let userDot = null;
+let radiusCircle = null;
+let pinMarkers = [];
+let _pinData = [];
+let _lastPins = [];
+let _mapOpen = false;
+
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function selectPin(i) {
+  document.getElementById('ssid').value = _pinData[i].name;
+  if (leafletMap) leafletMap.closePopup();
+}
+
+function makePinIcon(mbps) {
+  let bg = '#6b7280', label = '?';
+  if (mbps != null) {
+    bg = mbps >= 50 ? '#16a34a' : mbps >= 10 ? '#d97706' : '#dc2626';
+    label = mbps >= 100 ? String(Math.round(mbps)) : mbps.toFixed(1);
+  }
+  return L.divIcon({
+    className: 'map-pin-wrap',
+    html: `<div class="map-pin" style="background:${bg}">${label}</div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+    popupAnchor: [0, -24],
+  });
+}
+
+function updateMapPins(pins) {
+  _lastPins = pins;
+  if (!leafletMap) return;
+  pinMarkers.forEach(m => leafletMap.removeLayer(m));
+  pinMarkers = [];
+  _pinData = pins;
+
+  pins.forEach((pin, i) => {
+    const speedText = pin.median_download_mbps != null
+      ? `${pin.median_download_mbps.toFixed(1)} Mbps download`
+      : 'No speed data yet';
+    const srcIcon = pin.source === 'wifibuddy' ? '📶' : '🗺️';
+    const popup = `<div style="min-width:130px">
+      <strong>${_escHtml(pin.name)}</strong><br>
+      <small>${srcIcon} ${_escHtml(speedText)}</small><br>
+      <button onclick="selectPin(${i})"
+        style="margin-top:6px;padding:2px 10px;font-size:0.8rem;width:100%;cursor:pointer">
+        Use this place
+      </button></div>`;
+    const marker = L.marker([pin.lat, pin.lng], {icon: makePinIcon(pin.median_download_mbps)})
+      .bindPopup(popup)
+      .addTo(leafletMap);
+    pinMarkers.push(marker);
+  });
+}
+
+function initMap(lat, lng) {
+  leafletMap = L.map('map-container').setView([lat, lng], 17);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+  }).addTo(leafletMap);
+  userDot = L.circleMarker([lat, lng], {
+    radius: 8, color: '#1d4ed8', fillColor: '#3b82f6', fillOpacity: 0.9, weight: 2,
+  }).addTo(leafletMap).bindTooltip('You are here');
+}
+
+function centerMap(lat, lng) {
+  if (!leafletMap) return;
+  leafletMap.setView([lat, lng], 17);
+  if (userDot) userDot.setLatLng([lat, lng]);
+}
+
+function updateRadiusRing(lat, lng, radiusM) {
+  if (!leafletMap) return;
+  if (radiusCircle) {
+    radiusCircle.setLatLng([lat, lng]).setRadius(radiusM);
+  } else {
+    radiusCircle = L.circle([lat, lng], {
+      radius: radiusM,
+      color: '#3b82f6',
+      fillColor: '#3b82f6',
+      fillOpacity: 0.06,
+      weight: 1.5,
+      dashArray: '5 5',
+      interactive: false,
+    }).addTo(leafletMap);
+  }
+  leafletMap.fitBounds(radiusCircle.getBounds(), { padding: [24, 24] });
+}
+
+function toggleMap() {
+  const panel = document.getElementById('map-panel');
+  const btn   = document.getElementById('map-toggle-btn');
+  _mapOpen = !_mapOpen;
+  panel.style.display = _mapOpen ? 'block' : 'none';
+  btn.textContent = _mapOpen ? '🗺️ Hide Map' : '🗺️ Show Map';
+  if (_mapOpen) {
+    // setTimeout(0) is a macrotask — it runs after the browser has fully painted
+    // the now-visible panel, so Leaflet always measures real pixel dimensions.
+    // (offsetHeight forces a reflow but only resolves heights first in a flex
+    // column, leaving the cross-axis width at 0 when Leaflet calls getSize().)
+    setTimeout(() => {
+      if (!leafletMap && cachedCoords) {
+        initMap(cachedCoords.lat, cachedCoords.lng);
+        // Belt-and-suspenders: re-measure immediately after init in case the
+        // container shifted during tile layer attachment.
+        leafletMap.invalidateSize({ animate: false });
+        updateMapPins(_lastPins);
+        updateRadiusRing(cachedCoords.lat, cachedCoords.lng, parseInt(radiusSlider.value, 10));
+      } else if (leafletMap) {
+        leafletMap.invalidateSize({ animate: false });
+      }
+    }, 0);
+  }
+}
 
 document.getElementById('edit-name-btn').addEventListener('click', () => {
   const input = document.getElementById('ssid');
   input.focus();
   input.select();
+});
+
+const radiusSlider = document.getElementById('radius-slider');
+const radiusLabel  = document.getElementById('radius-label');
+radiusSlider.addEventListener('input', () => {
+  radiusLabel.textContent = `${radiusSlider.value} m`;
+  // Move the ring instantly while dragging; the pin refresh happens on 'change'.
+  if (cachedCoords) updateRadiusRing(cachedCoords.lat, cachedCoords.lng, parseInt(radiusSlider.value, 10));
+});
+radiusSlider.addEventListener('change', () => {
+  if (!cachedCoords) return;
+  clearTimeout(radiusDebounce);
+  radiusDebounce = setTimeout(() =>
+    populateNearbyDropdown(cachedCoords.lat, cachedCoords.lng), 300);
 });
 
 // ── Location + nearby places (auto-runs on load) ─────────────────────────────
@@ -171,70 +348,53 @@ async function detectLocation() {
   document.getElementById('lat').value = cachedCoords.lat.toFixed(6);
   document.getElementById('lng').value = cachedCoords.lng.toFixed(6);
 
+  document.getElementById('radius-row').style.display = 'flex';
+  document.getElementById('map-toggle-btn').style.display = '';
   setLocBar('', 'Loading nearby places…');
   await populateNearbyDropdown(cachedCoords.lat, cachedCoords.lng);
+
+  if (_mapOpen) {
+    centerMap(cachedCoords.lat, cachedCoords.lng);
+  } else {
+    // Auto-open the map once location is known (desktop: right column; mobile: below form).
+    toggleMap();
+  }
 }
 
 async function populateNearbyDropdown(lat, lng) {
-  const row    = document.getElementById('nearby-row');
-  const sel    = document.getElementById('place-select');
+  const dl = document.getElementById('place-suggestions');
+  const radius = document.getElementById('radius-slider').value;
 
   try {
-    const r = await fetch(`/api/venues/nearby?lat=${lat}&lng=${lng}&radius=100`);
+    const r = await fetch(`/api/venues/nearby?lat=${lat}&lng=${lng}&radius=${radius}`);
     if (!r.ok) throw new Error('API error');
     const data = await r.json();
     const suggestions = data.suggestions || [];
 
-    sel.innerHTML = '';
+    dl.innerHTML = '';
+    suggestions.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.name;
+      if (s.distance_m != null) opt.label = `${s.distance_m} m away`;
+      dl.appendChild(opt);
+    });
+
+    const pins = data.pins || [];
+    updateMapPins(pins);
+    if (cachedCoords) updateRadiusRing(cachedCoords.lat, cachedCoords.lng, parseInt(radius, 10));
 
     if (suggestions.length === 0) {
-      setLocBar('ok', `Location found — no named places within 100 m. Type the wifi name below.`);
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '— no places found nearby —';
-      sel.appendChild(opt);
+      setLocBar('ok', `Location found — no named places within ${radius} m. Type the wifi name below.`);
     } else {
-      setLocBar('ok', `Location found — ${suggestions.length} place${suggestions.length === 1 ? '' : 's'} within 100 m.`);
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = '— select a nearby place —';
-      sel.appendChild(placeholder);
-
-      suggestions.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.name;
-        opt.textContent = s.distance_m != null
-          ? `${s.name}  (${s.distance_m} m)`
-          : s.name;
-        sel.appendChild(opt);
-      });
-
-      const other = document.createElement('option');
-      other.value = '__manual__';
-      other.textContent = 'Enter manually…';
-      sel.appendChild(other);
-
-      row.style.display = '';
+      setLocBar('ok', `Location found — ${suggestions.length} place${suggestions.length === 1 ? '' : 's'} nearby. Click the Wifi Name field to choose one.`);
     }
   } catch (_) {
     setLocBar('ok', 'Location found — could not load nearby places. Type the wifi name below.');
-    sel.innerHTML = '<option value="">— could not load places —</option>';
-    row.style.display = '';
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   detectLocation();
-
-  document.getElementById('place-select').addEventListener('change', function () {
-    const val = this.value;
-    if (!val || val === '__manual__') {
-      document.getElementById('ssid').value = '';
-      document.getElementById('ssid').focus();
-    } else {
-      document.getElementById('ssid').value = val;
-    }
-  });
 });
 
 // ── Orchestrator: one button → speed test (location already obtained) ─────────

@@ -20,7 +20,16 @@ async def submit_form(
     return templates.TemplateResponse(
         request,
         "submit.html",
-        {"ssid": ssid, "venue_id": venue_id, "errors": [], "nav_active": "report"},
+        {
+            "ssid": ssid,
+            "venue_id": venue_id,
+            "errors": [],
+            "nav_active": "report",
+            "radius_default": config.NEARBY_RADIUS_DEFAULT_M,
+            "radius_min":     config.NEARBY_RADIUS_MIN_M,
+            "radius_max":     config.NEARBY_RADIUS_MAX_M,
+            "radius_step":    config.NEARBY_RADIUS_STEP_M,
+        },
     )
 
 
@@ -31,6 +40,13 @@ async def submit_report(request: Request):
     # Honeypot — bots fill hidden fields; legitimate users don't
     if form.get("honey", ""):
         return Response(status_code=200)
+
+    _radius_ctx = {
+        "radius_default": config.NEARBY_RADIUS_DEFAULT_M,
+        "radius_min":     config.NEARBY_RADIUS_MIN_M,
+        "radius_max":     config.NEARBY_RADIUS_MAX_M,
+        "radius_step":    config.NEARBY_RADIUS_STEP_M,
+    }
 
     ssid = (form.get("ssid") or "").strip()
     raw_download = form.get("download_mbps", "")
@@ -98,7 +114,7 @@ async def submit_report(request: Request):
         return templates.TemplateResponse(
             request,
             "submit.html",
-            {"ssid": ssid, "errors": errors, "nav_active": "report"},
+            {"ssid": ssid, "errors": errors, "nav_active": "report", **_radius_ctx},
             status_code=422,
         )
 
@@ -120,6 +136,7 @@ async def submit_report(request: Request):
                             "Try again in an hour."
                         ],
                         "nav_active": "report",
+                        **_radius_ctx,
                     },
                     status_code=429,
                 )
