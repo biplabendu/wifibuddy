@@ -19,7 +19,8 @@
   @media (max-width: 800px) {
     #page-layout { flex-direction: column; }
     #form-col { flex: none; width: 100%; max-width: 100%; }
-    #map-container { height: 320px; position: static; }
+    #map-panel { width: 100%; }
+    #map-container { width: 100%; height: 320px; position: static; }
   }
 </style>
 <style>
@@ -172,6 +173,7 @@ let radiusDebounce = null;
 // Map state
 let leafletMap = null;
 let userDot = null;
+let radiusCircle = null;
 let pinMarkers = [];
 let _pinData = [];
 let _lastPins = [];
@@ -244,6 +246,24 @@ function centerMap(lat, lng) {
   if (userDot) userDot.setLatLng([lat, lng]);
 }
 
+function updateRadiusRing(lat, lng, radiusM) {
+  if (!leafletMap) return;
+  if (radiusCircle) {
+    radiusCircle.setLatLng([lat, lng]).setRadius(radiusM);
+  } else {
+    radiusCircle = L.circle([lat, lng], {
+      radius: radiusM,
+      color: '#3b82f6',
+      fillColor: '#3b82f6',
+      fillOpacity: 0.06,
+      weight: 1.5,
+      dashArray: '5 5',
+      interactive: false,
+    }).addTo(leafletMap);
+  }
+  leafletMap.fitBounds(radiusCircle.getBounds(), { padding: [24, 24] });
+}
+
 function toggleMap() {
   const panel = document.getElementById('map-panel');
   const btn   = document.getElementById('map-toggle-btn');
@@ -251,14 +271,22 @@ function toggleMap() {
   panel.style.display = _mapOpen ? 'block' : 'none';
   btn.textContent = _mapOpen ? '🗺️ Hide Map' : '🗺️ Show Map';
   if (_mapOpen) {
-    requestAnimationFrame(() => {
+    // setTimeout(0) is a macrotask — it runs after the browser has fully painted
+    // the now-visible panel, so Leaflet always measures real pixel dimensions.
+    // (offsetHeight forces a reflow but only resolves heights first in a flex
+    // column, leaving the cross-axis width at 0 when Leaflet calls getSize().)
+    setTimeout(() => {
       if (!leafletMap && cachedCoords) {
         initMap(cachedCoords.lat, cachedCoords.lng);
+        // Belt-and-suspenders: re-measure immediately after init in case the
+        // container shifted during tile layer attachment.
+        leafletMap.invalidateSize({ animate: false });
         updateMapPins(_lastPins);
+        updateRadiusRing(cachedCoords.lat, cachedCoords.lng, parseInt(radiusSlider.value, 10));
       } else if (leafletMap) {
-        leafletMap.invalidateSize();
+        leafletMap.invalidateSize({ animate: false });
       }
-    });
+    }, 0);
   }
 }
 
@@ -272,6 +300,8 @@ const radiusSlider = document.getElementById('radius-slider');
 const radiusLabel  = document.getElementById('radius-label');
 radiusSlider.addEventListener('input', () => {
   radiusLabel.textContent = `${radiusSlider.value} m`;
+  // Move the ring instantly while dragging; the pin refresh happens on 'change'.
+  if (cachedCoords) updateRadiusRing(cachedCoords.lat, cachedCoords.lng, parseInt(radiusSlider.value, 10));
 });
 radiusSlider.addEventListener('change', () => {
   if (!cachedCoords) return;
@@ -325,8 +355,8 @@ async function detectLocation() {
 
   if (_mapOpen) {
     centerMap(cachedCoords.lat, cachedCoords.lng);
-  } else if (window.innerWidth > 800) {
-    // On desktop, auto-open the map so it appears on the right immediately.
+  } else {
+    // Auto-open the map once location is known (desktop: right column; mobile: below form).
     toggleMap();
   }
 }
@@ -351,6 +381,7 @@ async function populateNearbyDropdown(lat, lng) {
 
     const pins = data.pins || [];
     updateMapPins(pins);
+    if (cachedCoords) updateRadiusRing(cachedCoords.lat, cachedCoords.lng, parseInt(radius, 10));
 
     if (suggestions.length === 0) {
       setLocBar('ok', `Location found — no named places within ${radius} m. Type the wifi name below.`);
