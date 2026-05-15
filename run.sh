@@ -13,10 +13,21 @@
 #
 # Flags can be combined, e.g.:
 #   ./run.sh --skip-install --skip-tests --port 8765
+#
+# Database:
+#   By default, the local server uses a libsql file-mode database at
+#   ./wifibuddy.local.db (created automatically on first run). To run
+#   against a real Turso instance, export TURSO_DATABASE_URL and
+#   TURSO_AUTH_TOKEN before invoking this script.
 
 set -euo pipefail
 
 cd "$(dirname "$0")"
+
+# Default to a local libsql file db when no Turso URL is set. The app's
+# libsql client will create the file on first use.
+export TURSO_DATABASE_URL="${TURSO_DATABASE_URL:-file:./wifibuddy.local.db}"
+export TURSO_AUTH_TOKEN="${TURSO_AUTH_TOKEN:-}"
 
 SKIP_VENV=0
 SKIP_INSTALL=0
