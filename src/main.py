@@ -9,7 +9,7 @@ from src.routes import admin, reports, speedtest, venues
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.init_db()
+    await db.init_db()
     yield
 
 

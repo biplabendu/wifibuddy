@@ -3,4 +3,5 @@ uvicorn[standard]
 python-multipart
 jinja2
 httpx
+libsql-client
 pytest

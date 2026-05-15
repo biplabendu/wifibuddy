@@ -37,7 +37,6 @@ async def submit_form(
 async def submit_report(request: Request):
     form = await request.form()
 
-    # Honeypot — bots fill hidden fields; legitimate users don't
     if form.get("honey", ""):
         return Response(status_code=200)
 
@@ -55,7 +54,6 @@ async def submit_report(request: Request):
     raw_lat = form.get("lat", "")
     raw_lng = form.get("lng", "")
     name = (form.get("name") or "").strip() or None
-    # When the submit form sends only one "Wifi Name" field (new UI), mirror it into name.
     if name is None and ssid:
         name = ssid
 
@@ -120,12 +118,11 @@ async def submit_report(request: Request):
 
     client_ip = request.client.host if request.client else "unknown"
 
-    conn = db.get_conn()
-    try:
-        venue_id = db.find_matching_venue(conn, ssid, lat, lng)
+    async with db.get_client() as client:
+        venue_id = await db.find_matching_venue(client, ssid, lat, lng)
 
         if venue_id is not None:
-            if db.rate_limit_count(conn, client_ip, venue_id, config.RATE_LIMIT_HOURS) >= 1:
+            if await db.rate_limit_count(client, client_ip, venue_id, config.RATE_LIMIT_HOURS) >= 1:
                 return templates.TemplateResponse(
                     request,
                     "submit.html",
@@ -142,20 +139,17 @@ async def submit_report(request: Request):
                 )
 
         if venue_id is None:
-            cur = conn.execute(
+            rs = await client.execute(
                 "INSERT INTO venues (ssid, name, lat, lng) VALUES (?, ?, ?, ?)",
-                (ssid, name, lat, lng),
+                [ssid, name, lat, lng],
             )
-            venue_id = cur.lastrowid
+            venue_id = rs.last_insert_rowid
 
-        conn.execute(
+        await client.execute(
             "INSERT INTO speed_reports "
             "(venue_id, download_mbps, upload_mbps, ping_ms, submitter_ip) "
             "VALUES (?, ?, ?, ?, ?)",
-            (venue_id, download_mbps, upload_mbps, ping_ms, client_ip),
+            [venue_id, download_mbps, upload_mbps, ping_ms, client_ip],
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     return RedirectResponse(url=f"/venues/{venue_id}", status_code=303)
