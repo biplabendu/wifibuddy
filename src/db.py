@@ -7,8 +7,13 @@ import libsql_client
 
 
 def _client():
+    url = os.environ["TURSO_DATABASE_URL"]
+    # libsql:// defaults to WebSocket transport, which Vercel serverless
+    # functions don't support. Rewrite to https:// to force HTTP transport.
+    if url.startswith("libsql://"):
+        url = "https://" + url[len("libsql://"):]
     return libsql_client.create_client(
-        url=os.environ["TURSO_DATABASE_URL"],
+        url=url,
         auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""),
     )
 
