@@ -43,30 +43,30 @@ See `./run.sh --help` for flag options.
 
 ```mermaid
 flowchart LR
-    Browser["Browser<br/>(Jinja2 templates + JS)"]
-    subgraph App["FastAPI app (src/main.py)"]
-        Venues["routes/venues.py<br/>browse · venue detail · OSM lookup"]
-        Reports["routes/reports.py<br/>/submit · POST /reports"]
-        Admin["routes/admin.py<br/>protected DELETEs"]
-        Speedtest["routes/speedtest.py<br/>/ping /download /upload"]
-        DB["db.py<br/>libsql async client"]
-        Config["config.py<br/>thresholds, radii, auth"]
+    Browser["Visitor in browser"]
+    subgraph App["wifibuddy app (src/main.py)"]
+        Browse["Browse & map<br/>(routes/venues.py)"]
+        Submit["Submit a report<br/>(routes/reports.py)"]
+        Speed["Measure speed<br/>(routes/speedtest.py)"]
+        Admin["Admin tools<br/>(routes/admin.py)"]
+        Data["Database access<br/>(db.py)"]
+        Settings["Tunable settings<br/>(config.py)"]
     end
-    Turso[("Turso<br/>(libsql HTTP)")]
-    OSM[("OpenStreetMap<br/>Overpass API")]
+    Turso[("Cloud database<br/>(Turso)")]
+    OSM[("Map of nearby places<br/>(OpenStreetMap)")]
 
-    Browser -->|HTML & form posts| Venues
-    Browser -->|HTML & form posts| Reports
-    Browser -->|HTTP Basic| Admin
-    Browser -->|measure speed| Speedtest
-    Venues --> DB
-    Reports --> DB
-    Admin --> DB
-    Venues -->|nearby places| OSM
-    DB -->|https://| Turso
-    Venues -.-> Config
-    Reports -.-> Config
-    Admin -.-> Config
+    Browser --> Browse
+    Browser --> Submit
+    Browser --> Speed
+    Browser --> Admin
+    Browse --> Data
+    Submit --> Data
+    Admin --> Data
+    Browse -. nearby cafes .-> OSM
+    Data --> Turso
+    Browse -.- Settings
+    Submit -.- Settings
+    Admin -.- Settings
 ```
 
 **Core pieces**
@@ -81,69 +81,65 @@ flowchart LR
 
 ## Request flow
 
-The submit-a-report flow exercises most of the system:
+What happens when someone submits a speed report:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as User browser
-    participant R as routes/reports.py
-    participant S as routes/speedtest.py
-    participant D as db.py
-    participant T as Turso
-    participant O as OSM Overpass
+    participant U as Visitor
+    participant Sub as Submit page<br/>(routes/reports.py)
+    participant Sp as Speed test<br/>(routes/speedtest.py)
+    participant DB as Database<br/>(db.py + Turso)
+    participant OSM as OpenStreetMap
 
-    U->>R: GET /submit
-    R-->>U: submit.html (form + JS)
-    U->>O: (JS) geolocate → query nearby cafes
-    O-->>U: place suggestions
-    U->>S: GET /ping, /download, POST /upload
-    S-->>U: measured Mbps + ping
-    U->>R: POST /reports (ssid, lat, lng, mbps...)
-    R->>D: find_matching_venue (SSID + Haversine ≤ 50 m)
-    D->>T: SELECT venues WHERE ssid = ?
-    T-->>D: rows
-    alt no match
-        R->>D: INSERT venues
+    U->>Sub: Open the submit page
+    Sub-->>U: Show the form
+    U->>OSM: Look up nearby cafes
+    OSM-->>U: List of suggestions
+    U->>Sp: Measure download, upload, ping
+    Sp-->>U: Results in Mbps
+    U->>Sub: Submit the report
+    Sub->>DB: Already have this venue nearby?
+    alt First time seeing this venue
+        Sub->>DB: Create a new venue
     end
-    R->>D: rate_limit_count (IP, venue, 1 h)
-    alt under limit
-        R->>D: INSERT speed_reports
-        R-->>U: 303 redirect → /venue/{id}
-    else over limit
-        R-->>U: 429
+    Sub->>DB: Have they reported here recently?
+    alt Within the rate limit
+        Sub->>DB: Save the report
+        Sub-->>U: Show the venue page
+    else Too many recent reports
+        Sub-->>U: "Slow down" error
     end
 ```
 
-Browse and admin flows are simpler: `GET /` paginates venues ranked by median download Mbps; admin DELETEs are gated by `HTTPBasic`.
+Browsing and admin flows are simpler: the home page lists venues sorted by median download speed; admin actions require a password (HTTP Basic).
 
 ---
 
 ## Data model
 
+Two things get stored, defined in `src/db.py`:
+
 ```mermaid
 erDiagram
-    venues ||--o{ speed_reports : "has many"
-    venues {
-        INTEGER id PK
-        TEXT    ssid
-        TEXT    name
-        REAL    lat
-        REAL    lng
-        TEXT    created_at
+    Venue ||--o{ SpeedReport : "collects"
+    Venue {
+        string ssid "Wi-Fi network name"
+        string name "Cafe / venue name"
+        float  lat "Latitude"
+        float  lng "Longitude"
+        date   created_at "First seen"
     }
-    speed_reports {
-        INTEGER id PK
-        INTEGER venue_id FK
-        REAL    download_mbps
-        REAL    upload_mbps
-        REAL    ping_ms
-        TEXT    submitted_at
-        TEXT    submitter_ip
+    SpeedReport {
+        float download "Download (Mbps)"
+        float upload "Upload (Mbps)"
+        float ping "Ping (ms)"
+        date  submitted_at "When submitted"
+        string submitter_ip "Used to rate-limit"
     }
 ```
 
-Schema is created idempotently by `db.init_db()` on app startup (`CREATE TABLE IF NOT EXISTS …`). Indexes back the hot paths: SSID lookup, lat/lng prefilter, venue rollups, and the per-IP per-venue rate-limit query.
+A venue can have many reports — the app shows the **median** of those reports as the venue's speed. The schema is created automatically on first run.
 
 ---
 
