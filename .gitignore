@@ -52,3 +52,4 @@ wifibuddy.db
 *.db-wal
 *.db-shm
 current_state_next_steps.md
+wifibuddy.local.db
