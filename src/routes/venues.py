@@ -41,8 +41,18 @@ def time_ago(iso: Optional[str]) -> str:
         return iso
 
 
-def _enrich_venue(conn, row: dict) -> dict:
-    stats = db.venue_stats(conn, row["id"])
+def _rs_to_dicts(rs) -> list[dict]:
+    return [dict(zip(rs.columns, row)) for row in rs.rows]
+
+
+def _rs_first(rs) -> Optional[dict]:
+    if not rs.rows:
+        return None
+    return dict(zip(rs.columns, rs.rows[0]))
+
+
+async def _enrich_venue(client, row: dict) -> dict:
+    stats = await db.venue_stats(client, row["id"])
     md = stats["median_download_mbps"]
     return {
         **row,
@@ -54,12 +64,10 @@ def _enrich_venue(conn, row: dict) -> dict:
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, page: int = 1):
-    conn = db.get_conn()
-    try:
-        rows = conn.execute("SELECT id, ssid, name, lat, lng FROM venues").fetchall()
-        venues = [_enrich_venue(conn, dict(r)) for r in rows]
-    finally:
-        conn.close()
+    async with db.get_client() as client:
+        rs = await client.execute("SELECT id, ssid, name, lat, lng FROM venues")
+        rows = _rs_to_dicts(rs)
+        venues = [await _enrich_venue(client, r) for r in rows]
 
     venues.sort(key=lambda v: v["median_download_mbps"] or 0, reverse=True)
 
@@ -76,35 +84,32 @@ async def index(request: Request, page: int = 1):
 
 @router.get("/venues/{venue_id}", response_class=HTMLResponse)
 async def venue_detail(request: Request, venue_id: int, page: int = 1):
-    conn = db.get_conn()
-    try:
-        row = conn.execute("SELECT * FROM venues WHERE id = ?", (venue_id,)).fetchone()
+    async with db.get_client() as client:
+        row = _rs_first(await client.execute("SELECT * FROM venues WHERE id = ?", [venue_id]))
         if not row:
             return templates.TemplateResponse(
                 request, "404.html", {}, status_code=404
             )
-        venue = dict(row)
-        stats = db.venue_stats(conn, venue_id)
+        stats = await db.venue_stats(client, venue_id)
 
         offset = (page - 1) * 20
-        reports_raw = conn.execute(
+        rs = await client.execute(
             "SELECT id, download_mbps, upload_mbps, ping_ms, submitted_at "
             "FROM speed_reports WHERE venue_id = ? ORDER BY submitted_at DESC "
             "LIMIT 21 OFFSET ?",
-            (venue_id, offset),
-        ).fetchall()
+            [venue_id, offset],
+        )
+        reports_raw = _rs_to_dicts(rs)
         has_next = len(reports_raw) > 20
-        reports = [dict(r) for r in reports_raw[:20]]
+        reports = reports_raw[:20]
         for r in reports:
             r["submitted_ago"] = time_ago(r["submitted_at"])
-    finally:
-        conn.close()
 
     return templates.TemplateResponse(
         request,
         "venue.html",
         {
-            "venue": venue,
+            "venue": row,
             "stats": stats,
             "speed_class": speed_class(stats["median_download_mbps"]),
             "reports": reports,
@@ -118,30 +123,27 @@ async def venue_detail(request: Request, venue_id: int, page: int = 1):
 
 @router.get("/api/venues")
 async def api_venues(request: Request, page: int = 1, bbox: Optional[str] = None):
-    conn = db.get_conn()
-    try:
+    async with db.get_client() as client:
         if bbox:
             try:
                 west, south, east, north = map(float, bbox.split(","))
             except (ValueError, TypeError):
                 return JSONResponse({"error": "Invalid bbox"}, status_code=400, headers=_CORS)
-            rows = conn.execute(
+            rs = await client.execute(
                 "SELECT id, ssid, name, lat, lng FROM venues "
                 "WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?",
-                (south, north, west, east),
-            ).fetchall()
+                [south, north, west, east],
+            )
         else:
             offset = (page - 1) * config.PAGE_SIZE
-            rows = conn.execute(
+            rs = await client.execute(
                 "SELECT id, ssid, name, lat, lng FROM venues "
                 "ORDER BY id DESC LIMIT ? OFFSET ?",
-                (config.PAGE_SIZE, offset),
-            ).fetchall()
-        venues = [_enrich_venue(conn, dict(r)) for r in rows]
-    finally:
-        conn.close()
+                [config.PAGE_SIZE, offset],
+            )
+        rows = _rs_to_dicts(rs)
+        venues = [await _enrich_venue(client, r) for r in rows]
 
-    # Remove non-serialisable helpers before sending
     for v in venues:
         v.pop("last_reported_ago", None)
         v.pop("speed_class", None)
@@ -152,17 +154,17 @@ async def api_venues(request: Request, page: int = 1, bbox: Optional[str] = None
 @router.get("/api/venues/nearby")
 async def api_venues_nearby(lat: float, lng: float, radius: int = config.NEARBY_RADIUS_DEFAULT_M):
     radius = max(config.NEARBY_RADIUS_MIN_M, min(radius, config.NEARBY_RADIUS_MAX_M))
-    conn = db.get_conn()
-    try:
-        rows = conn.execute(
+    async with db.get_client() as client:
+        rs = await client.execute(
             "SELECT id, ssid, name, lat, lng FROM venues "
             "WHERE lat IS NOT NULL AND lng IS NOT NULL"
-        ).fetchall()
+        )
+        rows = _rs_to_dicts(rs)
         nearby = []
         for v in rows:
             dist = db.haversine_m(lat, lng, v["lat"], v["lng"])
             if dist <= radius:
-                stats = db.venue_stats(conn, v["id"])
+                stats = await db.venue_stats(client, v["id"])
                 nearby.append(
                     {
                         "id": v["id"],
@@ -174,25 +176,20 @@ async def api_venues_nearby(lat: float, lng: float, radius: int = config.NEARBY_
                         "median_download_mbps": stats["median_download_mbps"],
                     }
                 )
-        nearby.sort(key=lambda x: x["distance_m"])
-    finally:
-        conn.close()
+    nearby.sort(key=lambda x: x["distance_m"])
 
-    # Start with names from local wifibuddy venues
     suggestions = [
         {"name": v["name"], "distance_m": v["distance_m"]}
         for v in nearby
         if v["name"]
     ]
 
-    # Include all named OSM places within the radius regardless of category
     osm = await _osm_nearby(lat, lng, radius)
     seen = {s["name"] for s in suggestions}
     for place in osm:
         if place["name"] not in seen:
             suggestions.append({"name": place["name"], "distance_m": place.get("distance_m")})
 
-    # Build pins list for map display
     pins = []
     pins_names = set()
     for v in nearby:
@@ -222,8 +219,6 @@ async def api_venues_nearby(lat: float, lng: float, radius: int = config.NEARBY_
 
 
 async def _osm_nearby(lat: float, lng: float, radius: int) -> list[dict]:
-    # Query both nodes and ways — most cafes/shops in OSM are ways (polygons), not nodes.
-    # `out center` returns a center lat/lon for ways so we can compute distance.
     query = (
         f'[out:json][timeout:8];'
         f'(node["name"](around:{radius},{lat},{lng});'
@@ -245,7 +240,6 @@ async def _osm_nearby(lat: float, lng: float, radius: int) -> list[dict]:
             name = el.get("tags", {}).get("name")
             if not name:
                 continue
-            # nodes expose lat/lon directly; ways expose them under "center"
             el_lat = el.get("lat") or (el.get("center") or {}).get("lat")
             el_lon = el.get("lon") or (el.get("center") or {}).get("lon")
             results.append({
@@ -263,24 +257,16 @@ async def _osm_nearby(lat: float, lng: float, radius: int) -> list[dict]:
 
 @router.get("/api/venues/{venue_id}")
 async def api_venue_detail(venue_id: int):
-    conn = db.get_conn()
-    try:
-        row = conn.execute("SELECT * FROM venues WHERE id = ?", (venue_id,)).fetchone()
+    async with db.get_client() as client:
+        row = _rs_first(await client.execute("SELECT * FROM venues WHERE id = ?", [venue_id]))
         if not row:
-            return JSONResponse(
-                {"error": "Not found"}, status_code=404, headers=_CORS
-            )
-        stats = db.venue_stats(conn, venue_id)
-        reports = conn.execute(
+            return JSONResponse({"error": "Not found"}, status_code=404, headers=_CORS)
+        stats = await db.venue_stats(client, venue_id)
+        rs = await client.execute(
             "SELECT id, download_mbps, upload_mbps, ping_ms, submitted_at "
             "FROM speed_reports WHERE venue_id = ? ORDER BY submitted_at DESC LIMIT 20",
-            (venue_id,),
-        ).fetchall()
-        result = {
-            **dict(row),
-            **stats,
-            "reports": [dict(r) for r in reports],
-        }
-    finally:
-        conn.close()
+            [venue_id],
+        )
+        reports = _rs_to_dicts(rs)
+        result = {**row, **stats, "reports": reports}
     return JSONResponse(result, headers=_CORS)

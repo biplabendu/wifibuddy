@@ -27,17 +27,13 @@ def _require_admin(credentials: HTTPBasicCredentials = Depends(_security)):
 async def delete_report(
     report_id: int, _: HTTPBasicCredentials = Depends(_require_admin)
 ):
-    conn = db.get_conn()
-    try:
-        row = conn.execute(
-            "SELECT id FROM speed_reports WHERE id = ?", (report_id,)
-        ).fetchone()
-        if not row:
+    async with db.get_client() as client:
+        rs = await client.execute(
+            "SELECT id FROM speed_reports WHERE id = ?", [report_id]
+        )
+        if not rs.rows:
             raise HTTPException(status_code=404)
-        conn.execute("DELETE FROM speed_reports WHERE id = ?", (report_id,))
-        conn.commit()
-    finally:
-        conn.close()
+        await client.execute("DELETE FROM speed_reports WHERE id = ?", [report_id])
     return Response(status_code=204)
 
 
@@ -45,17 +41,14 @@ async def delete_report(
 async def delete_venue(
     venue_id: int, _: HTTPBasicCredentials = Depends(_require_admin)
 ):
-    conn = db.get_conn()
-    try:
-        row = conn.execute(
-            "SELECT id FROM venues WHERE id = ?", (venue_id,)
-        ).fetchone()
-        if not row:
+    async with db.get_client() as client:
+        rs = await client.execute(
+            "SELECT id FROM venues WHERE id = ?", [venue_id]
+        )
+        if not rs.rows:
             raise HTTPException(status_code=404)
-        conn.execute("DELETE FROM venues WHERE id = ?", (venue_id,))
-        conn.commit()
-    finally:
-        conn.close()
+        await client.execute("DELETE FROM speed_reports WHERE venue_id = ?", [venue_id])
+        await client.execute("DELETE FROM venues WHERE id = ?", [venue_id])
     return Response(status_code=204)
 
 
@@ -65,16 +58,13 @@ async def list_reports(
     limit: int = 50,
     offset: int = 0,
 ):
-    conn = db.get_conn()
-    try:
-        rows = conn.execute(
+    async with db.get_client() as client:
+        rs = await client.execute(
             "SELECT r.id, r.venue_id, v.ssid, r.download_mbps, r.upload_mbps, "
             "r.ping_ms, r.submitted_at "
             "FROM speed_reports r JOIN venues v ON v.id = r.venue_id "
             "ORDER BY r.submitted_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
-        reports = [dict(r) for r in rows]
-    finally:
-        conn.close()
+            [limit, offset],
+        )
+        reports = [dict(zip(rs.columns, row)) for row in rs.rows]
     return JSONResponse({"reports": reports})

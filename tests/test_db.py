@@ -52,21 +52,24 @@ def test_delete_venue_cascades_reports(conn):
     assert conn.execute("SELECT COUNT(*) FROM speed_reports WHERE venue_id=?", (venue_id,)).fetchone()[0] == 0
 
 
-def test_rate_limit_zero_for_new_pair(conn):
+def test_rate_limit_zero_for_new_pair(test_db_path, conn):
     from src.db import rate_limit_count
+    from tests.conftest import run_db_async
     seed_venue(conn, ssid="NewNet")
     venue_id = conn.execute("SELECT id FROM venues WHERE ssid='NewNet'").fetchone()["id"]
-    assert rate_limit_count(conn, "9.9.9.9", venue_id) == 0
+    assert run_db_async(test_db_path, rate_limit_count, "9.9.9.9", venue_id) == 0
 
 
-def test_rate_limit_nonzero_after_report(conn):
+def test_rate_limit_nonzero_after_report(test_db_path, conn):
     from src.db import rate_limit_count
+    from tests.conftest import run_db_async
     venue_id = seed_venue(conn, ssid="RatNet", ip="5.5.5.5")
-    assert rate_limit_count(conn, "5.5.5.5", venue_id) >= 1
+    assert run_db_async(test_db_path, rate_limit_count, "5.5.5.5", venue_id) >= 1
 
 
-def test_median_odd_count(conn):
+def test_median_odd_count(test_db_path, conn):
     from src.db import venue_stats
+    from tests.conftest import run_db_async
     venue_id = seed_venue(conn, ssid="OddNet", download=10.0)
     conn.execute(
         "INSERT INTO speed_reports (venue_id, download_mbps, upload_mbps, submitter_ip) VALUES (?,30.0,5.0,'x')",
@@ -77,17 +80,18 @@ def test_median_odd_count(conn):
         (venue_id,),
     )
     conn.commit()
-    stats = venue_stats(conn, venue_id)
+    stats = run_db_async(test_db_path, venue_stats, venue_id)
     assert stats["median_download_mbps"] == pytest.approx(20.0)
 
 
-def test_median_even_count(conn):
+def test_median_even_count(test_db_path, conn):
     from src.db import venue_stats
+    from tests.conftest import run_db_async
     venue_id = seed_venue(conn, ssid="EvenNet", download=10.0)
     conn.execute(
         "INSERT INTO speed_reports (venue_id, download_mbps, upload_mbps, submitter_ip) VALUES (?,30.0,5.0,'x')",
         (venue_id,),
     )
     conn.commit()
-    stats = venue_stats(conn, venue_id)
+    stats = run_db_async(test_db_path, venue_stats, venue_id)
     assert stats["median_download_mbps"] == pytest.approx(20.0)
